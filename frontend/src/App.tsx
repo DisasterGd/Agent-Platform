@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "./services/api";
+import { chatApi } from "./services/chat";
 import type { Conversation, Message } from "./types/chat";
 
 export default function App() {
@@ -11,14 +11,14 @@ export default function App() {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    const items = await api.listConversations();
+    const items = await chatApi.listConversations();
     setConversations(items);
     return items;
   }, []);
 
   const load = useCallback(async (id: number) => {
     setActiveId(id);
-    setMessages(await api.listMessages(id));
+    setMessages(await chatApi.listMessages(id));
   }, []);
 
   useEffect(() => {
@@ -30,7 +30,7 @@ export default function App() {
   async function createChat() {
     try {
       setError("");
-      const item = await api.createConversation();
+      const item = await chatApi.createConversation();
       await refresh();
       await load(item.id);
     } catch (e) {
@@ -46,7 +46,7 @@ export default function App() {
     let id = activeId;
     try {
       if (id === null) {
-        const item = await api.createConversation();
+        const item = await chatApi.createConversation();
         id = item.id;
         setActiveId(id);
         await refresh();
@@ -62,7 +62,7 @@ export default function App() {
       };
       setMessages(current => [...current, userMessage, assistantMessage]);
       setInput("");
-      await api.streamMessage(id, content, delta => {
+      await chatApi.streamMessage(id, content, delta => {
         setMessages(current => current.map(m =>
           m.id === assistantId ? { ...m, content: m.content + delta } : m
         ));
