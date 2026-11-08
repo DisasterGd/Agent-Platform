@@ -1,7 +1,7 @@
 # 数据库说明 v0.1
 
 - `users`：用户主体；当前仅创建本地开发用户。
-- `conversations`：会话，含 `user_id` 所有权字段。
+- `conversations`：会话，含 `user_id` 所有权字段与预留的 `project_id` 归属字段。
 - `messages`：会话消息，通过 `conversation_id` 关联会话。
 
 概念：
