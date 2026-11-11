@@ -27,6 +27,10 @@ class CreateConversationIn(BaseModel):
     title: str = "新会话"
 
 
+class RenameConversationIn(BaseModel):
+    title: str
+
+
 class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -56,6 +60,18 @@ def create_conversation(
     db: Session = Depends(get_db),
 ):
     return ChatService(db).create_conversation(user_id, body.title)
+
+
+@router.patch("/conversations/{conversation_id}", response_model=ConversationOut)
+def rename_conversation(
+    conversation_id: int,
+    body: RenameConversationIn,
+    db: Session = Depends(get_db),
+):
+    conversation = ChatService(db).rename_conversation(conversation_id, body.title)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return conversation
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=list[MessageOut])

@@ -11,6 +11,12 @@ export const chatApi = {
       body: JSON.stringify({ title }),
     }),
 
+  renameConversation: (id: number, title: string) =>
+    request<Conversation>(`/api/conversations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
+
   listMessages: (id: number) =>
     request<Message[]>(`/api/conversations/${id}/messages`),
 

@@ -40,11 +40,28 @@ class ChatService:
     def list_messages(self, conversation_id: int):
         return self.messages.list_by_conversation(conversation_id)
 
+    def rename_conversation(self, conversation_id: int, title: str) -> Conversation | None:
+        title = title.strip()
+        if not title:
+            return self.conversations.get(conversation_id)
+        return self.conversations.update_title(conversation_id, title)
+
+    def _auto_title(self, conversation_id: int, content: str) -> None:
+        """首条用户消息且标题仍为默认值时，用消息内容自动生成会话名。"""
+        conversation = self.conversations.get(conversation_id)
+        if conversation is None or conversation.title.strip() not in ("", "新会话"):
+            return
+        text = " ".join(content.split())
+        title = text[:20] + ("…" if len(text) > 20 else "")
+        self.conversations.update_title(conversation_id, title)
+
     async def stream_reply(self, conversation_id: int, content: str) -> AsyncIterator[Event]:
         yield task_started()
 
         # 先落库用户消息，再带着完整历史调用模型
         self.messages.add(conversation_id, "user", content)
+        self._auto_title(conversation_id, content)
+        self.conversations.touch(conversation_id)
         history = self.messages.list_by_conversation(conversation_id)
         chat_messages = build_context([(m.role, m.content) for m in history])
 
