@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from agent_platform.config import settings
 from apps.api.routes import auth, chat, files, health, knowledge, tasks
+from apps.api.routes import settings as settings_route
 
 app = FastAPI(title=settings.app_name, version="0.2.0")
 
@@ -18,6 +19,7 @@ app.add_middleware(
 )
 
 app.include_router(health.router, prefix=settings.api_v1_prefix)
+app.include_router(settings_route.router, prefix=settings.api_v1_prefix)
 app.include_router(chat.router, prefix=settings.api_v1_prefix)
 app.include_router(auth.router, prefix=settings.api_v1_prefix)
 app.include_router(tasks.router, prefix=settings.api_v1_prefix)

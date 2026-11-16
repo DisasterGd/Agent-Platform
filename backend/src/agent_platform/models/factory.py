@@ -1,7 +1,7 @@
-"""根据配置创建模型适配器，并提供可扩展的供应商登记表。
+"""根据配置创建模型适配器。
 
-新增模型（含未来多模态模型）时，调用 register_model_provider 登记一个
-builder 即可，无需改动 Agent 核心。默认登记 OpenAI 兼容接口（DeepSeek）。
+模型配置优先级：用户设置（data/settings.json）> .env。前端设置页可改。
+新增模型（含未来多模态）时调用 register_model_provider 登记 builder；默认走 OpenAI 兼容接口。
 """
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from collections.abc import Callable
 from agent_platform.config import settings
 from agent_platform.models.base import ChatModel
 from agent_platform.models.openai_compatible import OpenAICompatibleModel
+from agent_platform.services.settings_service import get_settings_service
 
 # name -> builder() -> ChatModel | None
 _providers: dict[str, Callable[[], ChatModel | None]] = {}
@@ -20,13 +21,19 @@ def register_model_provider(name: str, builder: Callable[[], ChatModel | None]) 
     _providers[name] = builder
 
 
+def _active_config() -> dict:
+    return get_settings_service().load()
+
+
 def _build_openai_compatible() -> ChatModel | None:
-    if not settings.llm_api_key:
+    cfg = _active_config()
+    api_key = cfg.get("api_key") or settings.llm_api_key
+    if not api_key:
         return None
     return OpenAICompatibleModel(
-        base_url=settings.llm_base_url,
-        api_key=settings.llm_api_key,
-        model=settings.llm_model,
+        base_url=cfg.get("base_url") or settings.llm_base_url,
+        api_key=api_key,
+        model=cfg.get("model") or settings.llm_model,
         temperature=settings.llm_temperature,
     )
 
@@ -44,6 +51,21 @@ def create_model(provider: str | None = None) -> ChatModel | None:
     if builder is None:
         return None
     return builder()
+
+
+def create_vision_model() -> ChatModel | None:
+    """视觉模型（用于识图）。未配置 vision_model 时返回 None。"""
+    cfg = _active_config()
+    vision_model = (cfg.get("vision_model") or "").strip()
+    api_key = cfg.get("api_key") or settings.llm_api_key
+    if not vision_model or not api_key:
+        return None
+    return OpenAICompatibleModel(
+        base_url=cfg.get("base_url") or settings.llm_base_url,
+        api_key=api_key,
+        model=vision_model,
+        temperature=0.0,
+    )
 
 
 def list_model_providers() -> list[str]:
