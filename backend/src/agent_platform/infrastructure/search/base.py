@@ -1,0 +1,16 @@
+"""联网搜索提供方接口。"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Protocol
+
+
+@dataclass
+class SearchResult:
+    title: str
+    url: str
+    snippet: str
+
+
+class SearchProvider(Protocol):
+    async def search(self, query: str, max_results: int = 5) -> list[SearchResult]: ...
