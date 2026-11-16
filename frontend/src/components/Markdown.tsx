@@ -32,7 +32,7 @@ const CodeBlock = memo(function CodeBlock({ language, code }: { language: string
         language={language || "text"}
         style={oneLight}
         wrapLongLines
-        customStyle={{ margin: 0, background: "transparent", fontSize: "13px", lineHeight: "1.6" }}
+        customStyle={{ margin: 0, background: "transparent", fontSize: "13px", lineHeight: "1.6", fontFamily: '"IBM Plex Mono","SFMono-Regular",Consolas,monospace' }}
       >
         {deferredCode}
       </SyntaxHighlighter>
@@ -52,7 +52,7 @@ const Mermaid = memo(function Mermaid({ code }: { code: string }) {
       try {
         const { default: mermaid } = await import("mermaid");
         if (cancelled) return;
-        mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "strict" });
+        mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "strict" });
         const { svg } = await mermaid.render(id, code);
         if (cancelled) return;
         if (containerRef.current) containerRef.current.innerHTML = svg;

@@ -4,9 +4,17 @@ import Markdown from "./components/Markdown";
 import type { Artifact, Attachment, Conversation, Message } from "./types/chat";
 
 const TOOL_LABELS: Record<string, string> = {
-  web_search: "正在联网搜索…",
-  generate_file: "正在生成文件…",
+  web_search: "联网搜索",
+  generate_file: "生成文件",
 };
+
+type ToolEntry = { name: string; state: "running" | "done" };
+
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
 
 export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -15,7 +23,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
-  const [toolActivity, setToolActivity] = useState("");
+  const [toolLog, setToolLog] = useState<ToolEntry[]>([]);
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
@@ -97,7 +105,7 @@ export default function App() {
     if (!content || busy) return;
     setError("");
     setBusy(true);
-    setToolActivity("");
+    setToolLog([]);
     let id = activeId;
     try {
       if (id === null) {
@@ -125,8 +133,16 @@ export default function App() {
             m.id === assistantId ? { ...m, content: m.content + delta } : m
           ));
         },
-        onToolStart: name => setToolActivity(TOOL_LABELS[name] || `正在调用工具 ${name}…`),
-        onToolEnd: () => setToolActivity(""),
+        onToolStart: name => {
+          setToolLog(log => [...log, { name, state: "running" as const }]);
+        },
+        onToolEnd: () => {
+          setToolLog(log => {
+            const idx = log.reduce<number>((acc, t, i) => (t.state === "running" ? i : acc), -1);
+            if (idx < 0) return log;
+            return log.map((t, i) => (i === idx ? { ...t, state: "done" as const } : t));
+          });
+        },
         onArtifact: (artifact: Artifact) => {
           setMessages(current => current.map(m =>
             m.id === assistantId ? { ...m, artifacts: [...(m.artifacts || []), artifact] } : m
@@ -141,7 +157,6 @@ export default function App() {
       }
     } finally {
       setBusy(false);
-      setToolActivity("");
     }
   }
 
@@ -150,13 +165,14 @@ export default function App() {
   }
 
   const questions = messages.filter(m => m.role === "user" && m.content.trim());
+  const activeConv = conversations.find(c => c.id === activeId);
 
   return <div className="shell">
     <aside className="sidebar">
-      <div className="brand"><b className="mark">A</b><div><strong>Agent Platform</strong><small>本地智能体工作台</small></div></div>
-      <button className="new" onClick={() => void createChat()}>＋ 新建会话</button>
-      <div className="section-label">最近会话</div>
-      <nav>{conversations.map(c =>
+      <div className="brand"><b className="mark">◉</b><div className="brand-word"><strong>Agent</strong><span>工作台</span></div></div>
+      <button className="new" onClick={() => void createChat()}>新建会话</button>
+      <div className="section-label">会话</div>
+      <nav className="conv-list">{conversations.map(c =>
         editingId === c.id ? (
           <input key={c.id} className="rename-input" autoFocus value={draftTitle}
             onChange={e => setDraftTitle(e.target.value)}
@@ -166,27 +182,35 @@ export default function App() {
               if (e.key === "Escape") { cancelRename.current = true; setEditingId(null); }
             }} />
         ) : (
-          <div key={c.id} className={`chat-link ${activeId === c.id ? "selected" : ""}`}>
-            <button className="chat-link-title" title={c.title}
+          <div key={c.id} className={`conv-item ${activeId === c.id ? "selected" : ""}`}>
+            <button className="conv-title" title={c.title}
               onClick={() => void load(c.id)}
-              onDoubleClick={() => startEdit(c)}>◦　{c.title}</button>
-            <button className="chat-link-edit" title="重命名" onClick={() => startEdit(c)}>✎</button>
+              onDoubleClick={() => startEdit(c)}>{c.title}</button>
+            <button className="conv-edit" title="重命名" onClick={() => startEdit(c)}>✎</button>
           </div>
         )
       )}</nav>
-      <div className="side-foot">● 本地开发环境</div>
+      <div className="side-foot"><span className="led" />本地运行</div>
     </aside>
+
     <main className="main">
-      <header><div><small>WORKSPACE</small><h1>智能体对话</h1></div><span className="version">v0.2.0 · 工具调用</span></header>
+      <header className="topbar">
+        <div className="topbar-title">{activeConv?.title ?? "新会话"}</div>
+        <div className="topbar-meta">
+          <span className="meta-item">模型 <b>DeepSeek</b></span>
+          <span className="meta-item">v0.2</span>
+          <span className="meta-item"><span className="led" />就绪</span>
+        </div>
+      </header>
 
       {questions.length > 0 && (
-        <aside className="locator">
-          <div className="locator-head"><span>问题定位</span><em>{questions.length}</em></div>
-          <div className="locator-list">
+        <aside className="index">
+          <div className="index-head"><span>问题索引</span><em>{questions.length}</em></div>
+          <div className="index-list">
             {questions.map((q, i) => (
-              <button key={q.id} className="locator-item" title={q.content} onClick={() => jumpTo(q.id)}>
-                <span className="locator-num">{i + 1}</span>
-                <span className="locator-label">{q.content.replace(/\s+/g, " ").trim().slice(0, 18) || "…"}</span>
+              <button key={q.id} className="index-item" title={q.content} onClick={() => jumpTo(q.id)}>
+                <span className="index-num">{i + 1}</span>
+                <span className="index-label">{q.content.replace(/\s+/g, " ").trim().slice(0, 18) || "…"}</span>
               </button>
             ))}
           </div>
@@ -195,14 +219,23 @@ export default function App() {
 
       <section className="chat-area">
         {messages.length === 0
-          ? <div className="welcome"><div className="spark">✳</div><h2>从一个想法开始</h2>
-              <p>输入一句话，与 DeepSeek 大模型开始对话。你可以让它<b>联网搜索</b>最新信息，或<b>生成文档</b>（Word / PDF / Markdown）。</p>
-              <span>已连接 DeepSeek · 支持工具调用 · 流式回复</span></div>
+          ? <div className="welcome">
+              <div className="welcome-mark">◉</div>
+              <h2>从一个想法开始</h2>
+              <p>输入一句话，Agent 会<b>联网搜索</b>最新信息，或<b>生成文档</b>（Word / PDF / Markdown）。</p>
+              <div className="panel">
+                <div className="panel-cell"><span>模型</span><b>DeepSeek</b></div>
+                <div className="panel-cell"><span>工具</span><b>搜索 · 文档</b></div>
+                <div className="panel-cell"><span>状态</span><b>就绪</b></div>
+              </div>
+            </div>
           : <div className="messages">{messages.map(m =>
               <article id={`msg-${m.id}`} className={`message ${m.role}`} key={m.id}>
-                <b className={`avatar ${m.role}`}>{m.role === "user" ? "你" : "AI"}</b>
-                <div className="bubble">
-                  <small>{m.role === "user" ? "你" : "Agent"}</small>
+                <div className="msg-meta">
+                  <span className="msg-who">{m.role === "user" ? "你" : "AGENT"}</span>
+                  <span className="msg-time">{fmtTime(m.created_at)}</span>
+                </div>
+                <div className="body">
                   {m.role === "user"
                     ? (<>
                         {m.content && <p className="user-text">{m.content}</p>}
@@ -217,8 +250,7 @@ export default function App() {
                       </>)
                     : (<>
                         {m.content ? <Markdown content={m.content} />
-                          : <span className="thinking">{busy ? (toolActivity || "正在思考…") : ""}</span>}
-                        {busy && toolActivity && m.content && <span className="tool-activity">⏳ {toolActivity}</span>}
+                          : <span className="thinking">{busy ? "正在思考…" : ""}</span>}
                         {m.artifacts && m.artifacts.length > 0 && (
                           <div className="artifacts">
                             {m.artifacts.map((a, i) => (
@@ -235,7 +267,21 @@ export default function App() {
               </article>
             )}</div>}
       </section>
+
       <div className="composer-wrap">
+        {toolLog.length > 0 && (
+          <div className="instrument">
+            <div className="instrument-list">
+              {toolLog.map((t, i) => (
+                <span key={i} className={`instrument-item ${t.state}`}>
+                  <span className="dot" />
+                  {TOOL_LABELS[t.name] || t.name}
+                  <span className="state">{t.state === "running" ? "进行中" : "已完成"}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         {error && <div className="error">{error}</div>}
         <div className="composer">
           {attachments.length > 0 && (
@@ -250,7 +296,8 @@ export default function App() {
               ))}
             </div>
           )}
-          <textarea rows={2} value={input} disabled={busy} placeholder="向 Agent 发送消息…（Enter 发送，Shift + Enter 换行）"
+          <textarea className="composer-input" rows={2} value={input} disabled={busy}
+            placeholder="向 Agent 发送消息…（Enter 发送，Shift + Enter 换行）"
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }} />
           <div className="composer-bottom">
@@ -260,9 +307,9 @@ export default function App() {
                 onChange={e => void attachFiles(e.target.files)} />
               <button className="attach-btn" type="button" title="上传文件或图片"
                 onClick={() => fileInputRef.current?.click()}>📎</button>
-              <small>支持联网搜索与文档生成</small>
+              <span className="hint">支持联网搜索与文档生成</span>
             </div>
-            <button disabled={busy || !input.trim()} onClick={() => void send()}>{busy ? "生成中…" : "发送　↑"}</button>
+            <button className="send-btn" disabled={busy || !input.trim()} onClick={() => void send()}>{busy ? "生成中…" : "发送　↑"}</button>
           </div>
         </div>
         <p className="disclaimer">Agent 可能生成不准确的信息。重要内容请自行核实。</p>
