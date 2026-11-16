@@ -3,7 +3,9 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+# 项目根目录（backend/src/agent_platform/config.py 往上三层）
+_ROOT = Path(__file__).resolve().parents[3]
+_ENV_FILE = _ROOT / ".env"
 
 
 class Settings(BaseSettings):
@@ -15,10 +17,21 @@ class Settings(BaseSettings):
     dev_user_id: int = 1
 
     # 大模型（OpenAI 兼容接口，默认指向 DeepSeek）
+    # llm_provider 用于在 models.factory 中选择适配器，未来多模态模型在此登记。
+    llm_provider: str = "deepseek"
     llm_base_url: str = "https://api.deepseek.com"
     llm_api_key: str = ""
     llm_model: str = "deepseek-chat"
     llm_temperature: float = 0.7
+
+    # 联网搜索（tools/builtin/search.py 调用）
+    # search_provider: duckduckgo（默认，零配置）| tavily | bing（后两者需 search_api_key）
+    search_provider: str = "duckduckgo"
+    search_api_key: str = ""
+    search_max_results: int = 5
+
+    # 文件存储根目录（上传文件 + Agent 生成的文件），未来可替换为对象存储。
+    storage_dir: str = str(_ROOT / "data")
 
     model_config = SettingsConfigDict(
         env_file=_ENV_FILE,
@@ -33,6 +46,14 @@ class Settings(BaseSettings):
     @property
     def model_configured(self) -> bool:
         return bool(self.llm_api_key)
+
+    @property
+    def uploads_dir(self) -> Path:
+        return Path(self.storage_dir) / "uploads"
+
+    @property
+    def generated_dir(self) -> Path:
+        return Path(self.storage_dir) / "generated"
 
 
 @lru_cache
