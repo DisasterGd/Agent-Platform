@@ -2,6 +2,8 @@
 
 Agent 核心、Service 与 API 层之间通过这些结构化事件传递流式输出。
 SSE 编码只发生在 API 层，核心层不依赖 HTTP 细节。
+
+v0.2 新增：工具调用与文件产出事件。
 """
 from __future__ import annotations
 
@@ -33,6 +35,19 @@ def task_completed() -> Event:
 
 def error(message: str) -> Event:
     return Event("error", {"message": message})
+
+
+def tool_started(name: str) -> Event:
+    return Event("tool_started", {"name": name})
+
+
+def tool_completed(name: str) -> Event:
+    return Event("tool_completed", {"name": name})
+
+
+def artifact_ready(artifact: dict[str, Any]) -> Event:
+    """Agent 生成了一个可下载文件。"""
+    return Event("artifact_ready", artifact)
 
 
 def to_sse(event: Event) -> str:
