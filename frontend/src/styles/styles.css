@@ -112,4 +112,36 @@ textarea{width:100%;resize:vertical;min-height:55px;color:#1f2430;background:tra
 .locator-num{flex:none;width:18px;height:18px;display:grid;place-items:center;border-radius:50%;background:#ece9fe;color:#6d28d9;font-size:10px;font-weight:600}
 .locator-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
+/* 附件（用户上传） */
+.attachments{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.attachment-image{display:block;max-width:180px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.4)}
+.attachment-image img{display:block;width:100%;height:auto}
+.attachment-file{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.16);color:#dbe7ff;font-size:12px;text-decoration:none}
+.message.user .attachment-file{color:#dbe7ff}
+
+/* 附件选择 chips（输入框上方） */
+.attachment-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.chip{display:inline-flex;align-items:center;gap:8px;padding:4px 6px 4px 4px;border:1px solid #e0e4ee;border-radius:8px;background:#f6f7fb;font-size:12px;color:#4b5563}
+.chip img{width:34px;height:34px;border-radius:6px;object-fit:cover;display:block}
+.chip-file{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip button{border:0;background:transparent;color:#98a1b3;font-size:15px;line-height:1;padding:2px 4px;border-radius:6px}
+.chip button:hover{background:#e4e8f0;color:#1f2430}
+
+/* 生成的文件下载卡片 */
+.artifacts{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.artifact{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid #d9d3ff;border-radius:10px;background:#f6f4ff;color:#4b5563;text-decoration:none;font-size:13px}
+.artifact:hover{border-color:#7c6cf2;background:#ece9fe}
+.artifact-icon{font-size:15px}
+.artifact-name{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.artifact-dl{color:#6758df;font-weight:600;font-size:12px}
+
+/* 工具调用状态 */
+.tool-activity{display:inline-block;margin-top:8px;padding:4px 10px;border-radius:20px;background:#f1f3f8;color:#667085;font-size:12px}
+
+/* 输入区工具按钮 */
+.composer-tools{display:flex;align-items:center;gap:8px}
+.composer-tools small{color:#98a1b3;font-size:11px}
+.attach-btn{border:0;background:transparent;color:#6758df;font-size:17px;padding:4px 8px;border-radius:8px}
+.attach-btn:hover{background:#ece9fe}
+
 @media(max-width:700px){.sidebar{width:68px;flex-basis:68px;padding:18px 8px}.brand{justify-content:center;padding:0 0 22px}.brand div,.section-label{font-size:0}.new{font-size:0;text-align:center}.chat-link{height:35px;padding:0}.chat-link-title{font-size:0;height:35px;padding:0}.chat-link-edit{display:none}.side-foot{font-size:0}header{padding:0 18px}.chat-area{padding:22px 16px}.composer-wrap{width:calc(100% - 28px)}.message{max-width:92%}.locator{display:none}}

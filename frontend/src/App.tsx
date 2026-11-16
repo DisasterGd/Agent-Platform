@@ -1,18 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { chatApi } from "./services/chat";
 import Markdown from "./components/Markdown";
-import type { Conversation, Message } from "./types/chat";
+import type { Artifact, Attachment, Conversation, Message } from "./types/chat";
+
+const TOOL_LABELS: Record<string, string> = {
+  web_search: "正在联网搜索…",
+  generate_file: "正在生成文件…",
+};
 
 export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
+  const [toolActivity, setToolActivity] = useState("");
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const cancelRename = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     const items = await chatApi.listConversations();
@@ -65,11 +73,31 @@ export default function App() {
     }
   }
 
+  async function attachFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setError("");
+    try {
+      for (const file of Array.from(files)) {
+        const att = await chatApi.uploadFile(file);
+        setAttachments(cur => [...cur, att]);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "上传失败");
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments(cur => cur.filter((_, i) => i !== index));
+  }
+
   async function send() {
     const content = input.trim();
     if (!content || busy) return;
     setError("");
     setBusy(true);
+    setToolActivity("");
     let id = activeId;
     try {
       if (id === null) {
@@ -80,21 +108,31 @@ export default function App() {
       }
       const userMessage: Message = {
         id: Date.now(), conversation_id: id, role: "user",
-        content, created_at: new Date().toISOString()
+        content, created_at: new Date().toISOString(),
+        attachments: attachments.length ? [...attachments] : undefined,
       };
       const assistantId = Date.now() + 1;
       const assistantMessage: Message = {
         id: assistantId, conversation_id: id, role: "assistant",
-        content: "", created_at: new Date().toISOString()
+        content: "", created_at: new Date().toISOString(), artifacts: [],
       };
       setMessages(current => [...current, userMessage, assistantMessage]);
       setInput("");
-      await chatApi.streamMessage(id, content, delta => {
-        setMessages(current => current.map(m =>
-          m.id === assistantId ? { ...m, content: m.content + delta } : m
-        ));
+      setAttachments([]);
+      await chatApi.streamMessage(id, content, {
+        onDelta: delta => {
+          setMessages(current => current.map(m =>
+            m.id === assistantId ? { ...m, content: m.content + delta } : m
+          ));
+        },
+        onToolStart: name => setToolActivity(TOOL_LABELS[name] || `正在调用工具 ${name}…`),
+        onToolEnd: () => setToolActivity(""),
+        onArtifact: (artifact: Artifact) => {
+          setMessages(current => current.map(m =>
+            m.id === assistantId ? { ...m, artifacts: [...(m.artifacts || []), artifact] } : m
+          ));
+        },
       });
-      await load(id);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "发送消息失败");
@@ -103,6 +141,7 @@ export default function App() {
       }
     } finally {
       setBusy(false);
+      setToolActivity("");
     }
   }
 
@@ -138,7 +177,7 @@ export default function App() {
       <div className="side-foot">● 本地开发环境</div>
     </aside>
     <main className="main">
-      <header><div><small>WORKSPACE</small><h1>智能体对话</h1></div><span className="version">v0.1.5 · Prototype</span></header>
+      <header><div><small>WORKSPACE</small><h1>智能体对话</h1></div><span className="version">v0.2.0 · 工具调用</span></header>
 
       {questions.length > 0 && (
         <aside className="locator">
@@ -157,16 +196,41 @@ export default function App() {
       <section className="chat-area">
         {messages.length === 0
           ? <div className="welcome"><div className="spark">✳</div><h2>从一个想法开始</h2>
-              <p>输入一句话，与 DeepSeek 大模型开始对话，消息会自动保存到本地 MySQL。</p>
-              <span>已连接 DeepSeek · 流式回复</span></div>
+              <p>输入一句话，与 DeepSeek 大模型开始对话。你可以让它<b>联网搜索</b>最新信息，或<b>生成文档</b>（Word / PDF / Markdown）。</p>
+              <span>已连接 DeepSeek · 支持工具调用 · 流式回复</span></div>
           : <div className="messages">{messages.map(m =>
               <article id={`msg-${m.id}`} className={`message ${m.role}`} key={m.id}>
                 <b className={`avatar ${m.role}`}>{m.role === "user" ? "你" : "AI"}</b>
                 <div className="bubble">
                   <small>{m.role === "user" ? "你" : "Agent"}</small>
                   {m.role === "user"
-                    ? <p className="user-text">{m.content}</p>
-                    : (m.content ? <Markdown content={m.content} /> : <span className="thinking">{busy ? "正在思考…" : ""}</span>)}
+                    ? (<>
+                        {m.content && <p className="user-text">{m.content}</p>}
+                        {m.attachments && m.attachments.length > 0 && (
+                          <div className="attachments">
+                            {m.attachments.map((a, i) => a.content_type.startsWith("image/")
+                              ? <a key={i} className="attachment-image" href={a.url} target="_blank" rel="noreferrer"><img src={a.url} alt={a.name} /></a>
+                              : <a key={i} className="attachment-file" href={a.url} target="_blank" rel="noreferrer">📄 {a.name}</a>
+                            )}
+                          </div>
+                        )}
+                      </>)
+                    : (<>
+                        {m.content ? <Markdown content={m.content} />
+                          : <span className="thinking">{busy ? (toolActivity || "正在思考…") : ""}</span>}
+                        {busy && toolActivity && m.content && <span className="tool-activity">⏳ {toolActivity}</span>}
+                        {m.artifacts && m.artifacts.length > 0 && (
+                          <div className="artifacts">
+                            {m.artifacts.map((a, i) => (
+                              <a key={i} className="artifact" href={a.url} download={a.filename} target="_blank" rel="noreferrer">
+                                <span className="artifact-icon">📄</span>
+                                <span className="artifact-name">{a.filename}</span>
+                                <span className="artifact-dl">下载</span>
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                      </>)}
                 </div>
               </article>
             )}</div>}
@@ -174,11 +238,32 @@ export default function App() {
       <div className="composer-wrap">
         {error && <div className="error">{error}</div>}
         <div className="composer">
+          {attachments.length > 0 && (
+            <div className="attachment-chips">
+              {attachments.map((a, i) => (
+                <span className="chip" key={i}>
+                  {a.content_type.startsWith("image/")
+                    ? <img src={a.url} alt={a.name} />
+                    : <span className="chip-file">📄 {a.name}</span>}
+                  <button type="button" title="移除" onClick={() => removeAttachment(i)}>×</button>
+                </span>
+              ))}
+            </div>
+          )}
           <textarea rows={2} value={input} disabled={busy} placeholder="向 Agent 发送消息…（Enter 发送，Shift + Enter 换行）"
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }} />
-          <div className="composer-bottom"><small>DeepSeek · 消息保存到本地 MySQL</small>
-            <button disabled={busy || !input.trim()} onClick={() => void send()}>{busy ? "生成中…" : "发送　↑"}</button></div>
+          <div className="composer-bottom">
+            <div className="composer-tools">
+              <input ref={fileInputRef} type="file" multiple hidden
+                accept="image/*,.pdf,.doc,.docx,.md,.txt,.csv,.json,.xlsx,.pptx"
+                onChange={e => void attachFiles(e.target.files)} />
+              <button className="attach-btn" type="button" title="上传文件或图片"
+                onClick={() => fileInputRef.current?.click()}>📎</button>
+              <small>支持联网搜索与文档生成</small>
+            </div>
+            <button disabled={busy || !input.trim()} onClick={() => void send()}>{busy ? "生成中…" : "发送　↑"}</button>
+          </div>
         </div>
         <p className="disclaimer">Agent 可能生成不准确的信息。重要内容请自行核实。</p>
       </div>
