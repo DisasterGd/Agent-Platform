@@ -306,7 +306,7 @@ export default function App() {
                 accept="image/*,.pdf,.doc,.docx,.md,.txt,.csv,.json,.xlsx,.pptx"
                 onChange={e => void attachFiles(e.target.files)} />
               <button className="attach-btn" type="button" title="上传文件或图片"
-                onClick={() => fileInputRef.current?.click()}>📎</button>
+                onClick={() => fileInputRef.current?.click()}>＋</button>
               <span className="hint">支持联网搜索与文档生成</span>
             </div>
             <button className="send-btn" disabled={busy || !input.trim()} onClick={() => void send()}>{busy ? "生成中…" : "发送　↑"}</button>

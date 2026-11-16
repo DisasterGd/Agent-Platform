@@ -122,6 +122,10 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
 .markdown th{background:var(--paper-deep);font-weight:600}
 .md-inline-code{background:var(--paper-deep);color:var(--signal-deep);padding:2px 6px;border-radius:3px;font-family:var(--mono);font-size:.86em}
 
+/* LaTeX 公式 */
+.markdown .katex{font-size:1.06em}
+.markdown .katex-display{margin:1em 0;overflow-x:auto;overflow-y:hidden;padding:4px 0}
+
 /* 代码块 */
 .codeblock{border:1px solid var(--line);border-radius:3px;overflow:hidden;margin:.8em 0;background:var(--paper-raised)}
 .codeblock-head{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:var(--paper-deep);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--ink-faint)}
@@ -173,8 +177,8 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
 .composer-bottom{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .composer-tools{display:flex;align-items:center;gap:10px}
 .composer-tools .hint{color:var(--ink-faint);font-family:var(--mono);font-size:11px}
-.attach-btn{border:0;background:transparent;color:var(--ink-soft);font-size:17px;padding:4px 8px;border-radius:3px}
-.attach-btn:hover{background:var(--paper-deep);color:var(--ink)}
+.attach-btn{width:32px;height:32px;display:grid;place-items:center;border:1px dashed var(--line-strong);border-radius:50%;background:transparent;color:var(--ink-faint);font-size:18px;line-height:1;padding:0;transition:color .15s,border-color .15s}
+.attach-btn:hover{color:var(--ink);border-color:var(--ink-faint);background:transparent}
 .send-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:0;border-radius:3px;color:#fff;background:var(--signal);font-size:13px;font-weight:500;transition:background .15s}
 .send-btn:hover{background:var(--signal-deep)}
 .send-btn:disabled{opacity:.4;cursor:not-allowed}

@@ -2,6 +2,9 @@ import { memo, useDeferredValue, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 
@@ -104,7 +107,7 @@ const components: Components = {
 export default memo(function Markdown({ content }: { content: string }) {
   return (
     <div className="markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>
         {content}
       </ReactMarkdown>
     </div>
