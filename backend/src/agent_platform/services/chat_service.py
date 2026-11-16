@@ -16,11 +16,17 @@ from agent_platform.core.events import (
     text_delta,
 )
 from agent_platform.infrastructure.database.models import Conversation
+from agent_platform.models.base import ChatMessage
 from agent_platform.models.factory import create_model
 from agent_platform.repositories.conversations import ConversationRepository
 from agent_platform.repositories.messages import MessageRepository
 from agent_platform.tools.builtin.registry import build_default_registry
 from agent_platform.tools.registry import ToolRegistry
+
+TITLE_SYSTEM_PROMPT = (
+    "你是会话标题生成器。根据用户的问题，输出一个不超过 12 个汉字的中文标题，"
+    "概括对话主题。只输出标题本身，不要引号、标点或任何解释。"
+)
 
 
 class ChatService:
@@ -49,13 +55,26 @@ class ChatService:
             return self.conversations.get(conversation_id)
         return self.conversations.update_title(conversation_id, title)
 
-    def _auto_title(self, conversation_id: int, content: str) -> None:
-        """首条用户消息且标题仍为默认值时，用消息内容自动生成会话名。"""
+    async def _auto_title(self, conversation_id: int, content: str) -> None:
+        """首条用户消息且标题仍为默认值时，用模型生成简洁标题（无模型则退化截断）。"""
         conversation = self.conversations.get(conversation_id)
         if conversation is None or conversation.title.strip() not in ("", "新会话"):
             return
-        text = " ".join(content.split())
-        title = text[:20] + ("…" if len(text) > 20 else "")
+        title = ""
+        if self.model is not None:
+            try:
+                title = await self.model.complete(
+                    [
+                        ChatMessage(role="system", content=TITLE_SYSTEM_PROMPT),
+                        ChatMessage(role="user", content=content),
+                    ]
+                )
+            except Exception:  # noqa: BLE001 — 标题生成失败不影响主流程
+                title = ""
+        title = " ".join(title.split()).strip().strip('"\'“”「」『』')
+        if not title:
+            text = " ".join(content.split())
+            title = text[:20] + ("…" if len(text) > 20 else "")
         self.conversations.update_title(conversation_id, title)
 
     async def stream_reply(self, conversation_id: int, content: str) -> AsyncIterator[Event]:
@@ -63,7 +82,6 @@ class ChatService:
 
         # 先落库用户消息，再带着完整历史调用模型
         self.messages.add(conversation_id, "user", content)
-        self._auto_title(conversation_id, content)
         self.conversations.touch(conversation_id)
         history = self.messages.list_by_conversation(conversation_id)
         chat_messages = build_context([(m.role, m.content) for m in history])
@@ -87,6 +105,7 @@ class ChatService:
         reply = "".join(parts).strip()
         if reply:
             self.messages.add(conversation_id, "assistant", reply)
+        await self._auto_title(conversation_id, content)
         yield task_completed()
 
     async def _demo_stream(self, user_text: str) -> AsyncIterator[str]:
