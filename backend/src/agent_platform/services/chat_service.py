@@ -1,4 +1,4 @@
-"""聊天业务用例：会话管理 + 流式回复。"""
+"""聊天业务用例：会话管理 + 流式回复（v0.2 支持工具调用）。"""
 from __future__ import annotations
 
 import asyncio
@@ -19,6 +19,8 @@ from agent_platform.infrastructure.database.models import Conversation
 from agent_platform.models.factory import create_model
 from agent_platform.repositories.conversations import ConversationRepository
 from agent_platform.repositories.messages import MessageRepository
+from agent_platform.tools.builtin.registry import build_default_registry
+from agent_platform.tools.registry import ToolRegistry
 
 
 class ChatService:
@@ -27,6 +29,7 @@ class ChatService:
         self.conversations = ConversationRepository(db)
         self.messages = MessageRepository(db)
         self.model = create_model()
+        self.tools: ToolRegistry = build_default_registry()
 
     def create_conversation(self, user_id: int, title: str = "新会话") -> Conversation:
         return self.conversations.create(user_id, title)
@@ -68,10 +71,11 @@ class ChatService:
         parts: list[str] = []
         try:
             if self.model is not None:
-                agent = Agent(self.model)
-                async for token in agent.stream(chat_messages):
-                    parts.append(token)
-                    yield text_delta(token)
+                agent = Agent(self.model, tools=self.tools)
+                async for event in agent.stream(chat_messages):
+                    if event.type == "text_delta":
+                        parts.append(event.data.get("content", ""))
+                    yield event
             else:
                 async for token in self._demo_stream(content):
                     parts.append(token)

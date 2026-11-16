@@ -5,9 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from agent_platform.config import settings
-from apps.api.routes import auth, chat, health, knowledge, tasks
+from apps.api.routes import auth, chat, files, health, knowledge, tasks
 
-app = FastAPI(title=settings.app_name, version="0.1.5")
+app = FastAPI(title=settings.app_name, version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,6 +22,7 @@ app.include_router(chat.router, prefix=settings.api_v1_prefix)
 app.include_router(auth.router, prefix=settings.api_v1_prefix)
 app.include_router(tasks.router, prefix=settings.api_v1_prefix)
 app.include_router(knowledge.router, prefix=settings.api_v1_prefix)
+app.include_router(files.router, prefix=settings.api_v1_prefix)
 
 
 # 托管已构建的前端（frontend/dist），使 http://127.0.0.1:8000 直接打开页面。
