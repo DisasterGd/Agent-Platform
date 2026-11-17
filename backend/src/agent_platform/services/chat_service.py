@@ -62,6 +62,37 @@ class ChatService:
             return self.conversations.get(conversation_id)
         return self.conversations.update_title(conversation_id, title)
 
+    def update_conversation(
+        self,
+        conversation_id: int,
+        title: str | None = None,
+        pinned: bool | None = None,
+    ) -> Conversation | None:
+        if title is not None:
+            title = title.strip() or None
+        return self.conversations.update(conversation_id, title=title, pinned=pinned)
+
+    def delete_conversation(self, conversation_id: int) -> bool:
+        return self.conversations.delete(conversation_id)
+
+    async def regenerate_reply(
+        self,
+        conversation_id: int,
+        message_id: int,
+        new_content: str | None = None,
+    ) -> AsyncIterator[Event]:
+        """重新生成某条用户提问之后的回复（可选替换该提问内容）。"""
+        target = self.messages.get(message_id)
+        if target is None or target.conversation_id != conversation_id or target.role != "user":
+            yield error("要重新生成的消息不存在或不是用户提问")
+            return
+        content = new_content.strip() if new_content is not None and new_content.strip() else target.content
+        attachments = target.attachments or []
+        # 删除该用户消息及其之后的所有消息，再按（可能编辑过的）内容重跑
+        self.messages.delete_from(conversation_id, message_id)
+        async for event in self.stream_reply(conversation_id, content, attachments):
+            yield event
+
     async def _auto_title(self, conversation_id: int, content: str) -> None:
         """首条用户消息且标题仍为默认值时，用模型生成简洁标题（无模型则退化截断）。"""
         conversation = self.conversations.get(conversation_id)

@@ -63,6 +63,9 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
 .new::before{content:"＋";font-weight:400}
 .new:hover{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 .section-label{margin:26px 8px 10px;color:var(--ink-faint);font-size:11px;letter-spacing:.06em;flex:none}
+.conv-search{width:100%;margin:0 0 8px;padding:8px 10px;border:1px solid var(--line);border-radius:3px;background:var(--paper-raised);color:var(--ink);font-size:12px;outline:0;flex:none}
+.conv-search:focus{border-color:var(--ink)}
+.conv-search::placeholder{color:var(--ink-faint)}
 .conv-list{display:flex;flex-direction:column;gap:2px;flex:1;min-height:0;overflow-y:auto;padding-right:2px}
 .conv-item{position:relative;display:flex;align-items:center;gap:2px;border-radius:3px}
 .conv-item:hover{background:rgba(28,30,36,.05)}
@@ -73,6 +76,13 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
 .conv-edit{flex:none;width:26px;height:26px;margin-right:6px;border:0;border-radius:3px;color:var(--ink-faint);background:transparent;font-size:12px;opacity:0;transition:opacity .15s}
 .conv-item:hover .conv-edit,.conv-item.selected .conv-edit{opacity:1}
 .conv-edit:hover{background:rgba(28,30,36,.08);color:var(--ink)}
+.conv-pin,.conv-del{flex:none;width:24px;height:24px;margin-right:2px;border:0;border-radius:3px;color:var(--ink-faint);background:transparent;font-size:12px;line-height:1;opacity:0;transition:opacity .15s;padding:0}
+.conv-item:hover .conv-pin,.conv-item.selected .conv-pin,
+.conv-item:hover .conv-del,.conv-item.selected .conv-del{opacity:1}
+.conv-pin:hover{background:rgba(28,30,36,.08);color:var(--ink)}
+.conv-pin.on{opacity:1;color:var(--signal)}
+.conv-del{margin-right:6px}
+.conv-del:hover{background:rgba(198,60,44,.1);color:var(--signal)}
 .rename-input{width:100%;padding:9px 12px;border:1px solid var(--signal);border-radius:3px;color:var(--ink);background:var(--paper-raised);font-size:13px;outline:0}
 .side-foot{display:flex;align-items:center;gap:8px;margin-top:auto;padding:16px 6px 0;border-top:1px solid var(--line);color:var(--ink-faint);font-family:var(--mono);font-size:11px;flex:none}
 .led{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
@@ -117,11 +127,25 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
 .msg-meta{display:flex;align-items:baseline;gap:10px;font-family:var(--mono);font-size:11px}
 .msg-who{font-weight:500;letter-spacing:.14em}
 .msg-time{color:var(--ink-faint)}
+.msg-copy{border:0;background:transparent;color:var(--ink-faint);font-family:var(--mono);font-size:11px;padding:0;opacity:0;transition:opacity .15s}
+.message:hover .msg-copy{opacity:1}
+.msg-copy:hover{color:var(--ink)}
 .message.user .msg-who{color:var(--signal)}
 .message.assistant .msg-who{color:var(--ink-faint)}
 .body{min-width:0;padding-left:16px;border-left:2px solid var(--line);font-size:15px;line-height:1.8;color:var(--ink);overflow-wrap:anywhere}
 .message.user .body{border-left-color:var(--signal)}
 .user-text{margin:0;white-space:pre-wrap}
+.msg-actions{display:flex;gap:8px;margin-top:10px}
+.msg-action{border:1px solid var(--line);border-radius:3px;background:transparent;color:var(--ink-faint);font-size:12px;padding:3px 10px;font-family:var(--mono)}
+.msg-action:hover{color:var(--ink);border-color:var(--line-strong)}
+.edit-box{display:flex;flex-direction:column;gap:10px}
+.edit-box textarea{width:100%;min-height:80px;resize:vertical;padding:10px 12px;border:1px solid var(--signal);border-radius:3px;background:var(--paper-raised);color:var(--ink);font-size:15px;line-height:1.7;outline:0;font-family:inherit}
+.edit-actions{display:flex;gap:8px;justify-content:flex-end}
+.edit-actions button{border:1px solid var(--line);border-radius:3px;background:transparent;color:var(--ink-soft);font-size:12px;padding:6px 12px}
+.edit-actions button:hover{color:var(--ink);border-color:var(--line-strong)}
+.edit-actions button.primary{border-color:var(--signal);color:#fff;background:var(--signal)}
+.edit-actions button.primary:hover{background:var(--signal-deep)}
+.edit-actions button.primary:disabled{opacity:.5;cursor:not-allowed}
 .thinking{display:inline-block;color:var(--ink-faint);font-size:15px}
 
 /* Markdown 正文 */
@@ -261,7 +285,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
   .conv-item{justify-content:center}
   .conv-item.selected::before{display:none}
   .conv-title{font-size:0;padding:0;height:34px}
-  .conv-edit{display:none}
+  .conv-edit,.conv-pin,.conv-del,.conv-search{display:none}
   .side-foot{font-size:0;justify-content:center}
   .topbar{padding:0 16px}
   .topbar-meta .meta-item:nth-child(2){display:none}

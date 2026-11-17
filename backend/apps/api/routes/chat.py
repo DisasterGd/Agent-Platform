@@ -19,6 +19,7 @@ class ConversationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     title: str
+    pinned: bool
     created_at: datetime
     updated_at: datetime
 
@@ -27,8 +28,9 @@ class CreateConversationIn(BaseModel):
     title: str = "新会话"
 
 
-class RenameConversationIn(BaseModel):
-    title: str
+class UpdateConversationIn(BaseModel):
+    title: str | None = None
+    pinned: bool | None = None
 
 
 class MessageOut(BaseModel):
@@ -53,6 +55,12 @@ class ChatStreamIn(BaseModel):
     attachments: list[AttachmentIn] = []
 
 
+class RegenerateIn(BaseModel):
+    conversation_id: int
+    message_id: int
+    content: str | None = None
+
+
 @router.get("/conversations", response_model=list[ConversationOut])
 def list_conversations(
     user_id: int = Depends(get_current_user_id),
@@ -71,15 +79,24 @@ def create_conversation(
 
 
 @router.patch("/conversations/{conversation_id}", response_model=ConversationOut)
-def rename_conversation(
+def update_conversation(
     conversation_id: int,
-    body: RenameConversationIn,
+    body: UpdateConversationIn,
     db: Session = Depends(get_db),
 ):
-    conversation = ChatService(db).rename_conversation(conversation_id, body.title)
+    conversation = ChatService(db).update_conversation(conversation_id, body.title, body.pinned)
     if conversation is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     return conversation
+
+
+@router.delete("/conversations/{conversation_id}", status_code=204)
+def delete_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+):
+    if not ChatService(db).delete_conversation(conversation_id):
+        raise HTTPException(status_code=404, detail="会话不存在")
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=list[MessageOut])
@@ -102,6 +119,23 @@ async def stream_chat(body: ChatStreamIn, db: Session = Depends(get_db)):
             body.content,
             [a.model_dump() for a in body.attachments],
         ):
+            yield to_sse(event)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/chat/regenerate")
+async def regenerate_chat(body: RegenerateIn, db: Session = Depends(get_db)):
+    service = ChatService(db)
+    if service.get_conversation(body.conversation_id) is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    async def event_stream() -> AsyncIterator[str]:
+        async for event in service.regenerate_reply(body.conversation_id, body.message_id, body.content):
             yield to_sse(event)
 
     return StreamingResponse(

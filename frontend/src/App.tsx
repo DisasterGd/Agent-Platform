@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { chatApi } from "./services/chat";
+import { chatApi, type StreamHandlers } from "./services/chat";
 import Markdown from "./components/Markdown";
 import SettingsModal from "./components/SettingsModal";
 import type { Artifact, Attachment, Conversation, Message } from "./types/chat";
@@ -28,6 +28,10 @@ export default function App() {
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
+  const [search, setSearch] = useState("");
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [editingMsgId, setEditingMsgId] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState("");
   const cancelRename = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [theme, setTheme] = useState<"light" | "dark">(() => {
@@ -85,10 +89,35 @@ export default function App() {
     if (!next || next === conversations.find(c => c.id === id)?.title) return;
     try {
       setError("");
-      await chatApi.renameConversation(id, next);
+      await chatApi.updateConversation(id, { title: next });
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "重命名失败");
+    }
+  }
+
+  async function pin(c: Conversation) {
+    try {
+      setError("");
+      await chatApi.updateConversation(c.id, { pinned: !c.pinned });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "置顶失败");
+    }
+  }
+
+  async function removeConv(c: Conversation) {
+    if (!window.confirm(`删除会话「${c.title}」？此操作不可恢复。`)) return;
+    try {
+      setError("");
+      await chatApi.deleteConversation(c.id);
+      const items = await refresh();
+      if (activeId === c.id) {
+        if (items.length) await load(items[0].id);
+        else { setActiveId(null); setMessages([]); }
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "删除会话失败");
     }
   }
 
@@ -109,6 +138,23 @@ export default function App() {
 
   function removeAttachment(index: number) {
     setAttachments(cur => cur.filter((_, i) => i !== index));
+  }
+
+  function streamHandlers(assistantId: number): StreamHandlers {
+    return {
+      onDelta: delta => setMessages(current => current.map(m =>
+        m.id === assistantId ? { ...m, content: m.content + delta } : m
+      )),
+      onToolStart: name => setToolLog(log => [...log, { name, state: "running" as const }]),
+      onToolEnd: () => setToolLog(log => {
+        const idx = log.reduce<number>((acc, t, i) => (t.state === "running" ? i : acc), -1);
+        if (idx < 0) return log;
+        return log.map((t, i) => (i === idx ? { ...t, state: "done" as const } : t));
+      }),
+      onArtifact: (artifact: Artifact) => setMessages(current => current.map(m =>
+        m.id === assistantId ? { ...m, artifacts: [...(m.artifacts || []), artifact] } : m
+      )),
+    };
   }
 
   async function send() {
@@ -139,28 +185,7 @@ export default function App() {
       setMessages(current => [...current, userMessage, assistantMessage]);
       setInput("");
       setAttachments([]);
-      await chatApi.streamMessage(id, content, sentAttachments, {
-        onDelta: delta => {
-          setMessages(current => current.map(m =>
-            m.id === assistantId ? { ...m, content: m.content + delta } : m
-          ));
-        },
-        onToolStart: name => {
-          setToolLog(log => [...log, { name, state: "running" as const }]);
-        },
-        onToolEnd: () => {
-          setToolLog(log => {
-            const idx = log.reduce<number>((acc, t, i) => (t.state === "running" ? i : acc), -1);
-            if (idx < 0) return log;
-            return log.map((t, i) => (i === idx ? { ...t, state: "done" as const } : t));
-          });
-        },
-        onArtifact: (artifact: Artifact) => {
-          setMessages(current => current.map(m =>
-            m.id === assistantId ? { ...m, artifacts: [...(m.artifacts || []), artifact] } : m
-          ));
-        },
-      });
+      await chatApi.streamMessage(id, content, sentAttachments, streamHandlers(assistantId));
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "发送消息失败");
@@ -172,19 +197,81 @@ export default function App() {
     }
   }
 
+  async function regenerate(userMessageId: number, newContent?: string) {
+    if (busy || activeId === null) return;
+    const idx = messages.findIndex(m => m.id === userMessageId);
+    if (idx < 0) return;
+    const original = messages[idx];
+    const convId = activeId;
+    setError("");
+    setBusy(true);
+    setToolLog([]);
+    setEditingMsgId(null);
+    setEditDraft("");
+    const assistantId = Date.now() + 1;
+    try {
+      const base = newContent !== undefined
+        ? [...messages.slice(0, idx), {
+            id: Date.now(), conversation_id: convId, role: "user" as const,
+            content: newContent, created_at: new Date().toISOString(),
+            attachments: original.attachments,
+          }]
+        : [...messages.slice(0, idx), original];
+      const assistantMessage: Message = {
+        id: assistantId, conversation_id: convId, role: "assistant",
+        content: "", created_at: new Date().toISOString(), artifacts: [],
+      };
+      setMessages([...base, assistantMessage]);
+      await chatApi.regenerate(convId, userMessageId, newContent, streamHandlers(assistantId));
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "重新生成失败");
+      try { await load(convId); } catch { /* keep original error */ }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startEditMessage(m: Message) {
+    setEditingMsgId(m.id);
+    setEditDraft(m.content);
+  }
+
+  function cancelEditMessage() {
+    setEditingMsgId(null);
+    setEditDraft("");
+  }
+
+  async function copyMessage(m: Message) {
+    try {
+      await navigator.clipboard.writeText(m.content);
+      setCopiedId(m.id);
+      window.setTimeout(() => setCopiedId(cur => (cur === m.id ? null : cur)), 1500);
+    } catch {
+      setError("复制失败，请手动选择文本");
+    }
+  }
+
   function jumpTo(id: number) {
     document.getElementById(`msg-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   const questions = messages.filter(m => m.role === "user" && m.content.trim());
   const activeConv = conversations.find(c => c.id === activeId);
+  const lastUserMsg = [...messages].reverse().find(m => m.role === "user");
+  const visible = conversations.filter(c => {
+    const kw = search.trim().toLowerCase();
+    return !kw || c.title.toLowerCase().includes(kw);
+  });
 
   return <div className="shell">
     <aside className="sidebar">
       <div className="brand"><b className="mark">◉</b><div className="brand-word"><strong>Agent</strong><span>工作台</span></div></div>
       <button className="new" onClick={() => void createChat()}>新建会话</button>
       <div className="section-label">会话</div>
-      <nav className="conv-list">{conversations.map(c =>
+      <input className="conv-search" placeholder="搜索会话…" value={search}
+        onChange={e => setSearch(e.target.value)} />
+      <nav className="conv-list">{visible.map(c =>
         editingId === c.id ? (
           <input key={c.id} className="rename-input" autoFocus value={draftTitle}
             onChange={e => setDraftTitle(e.target.value)}
@@ -199,6 +286,9 @@ export default function App() {
               onClick={() => void load(c.id)}
               onDoubleClick={() => startEdit(c)}>{c.title}</button>
             <button className="conv-edit" title="重命名" onClick={() => startEdit(c)}>✎</button>
+            <button className={`conv-pin ${c.pinned ? "on" : ""}`} title={c.pinned ? "取消置顶" : "置顶"}
+              onClick={() => void pin(c)}>📌</button>
+            <button className="conv-del" title="删除" onClick={() => void removeConv(c)}>✕</button>
           </div>
         )
       )}</nav>
@@ -210,7 +300,7 @@ export default function App() {
         <div className="topbar-title">{activeConv?.title ?? "新会话"}</div>
         <div className="topbar-meta">
           <span className="meta-item">模型 <b>DeepSeek</b></span>
-          <span className="meta-item">v0.2</span>
+          <span className="meta-item">v0.2.5</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
@@ -242,25 +332,49 @@ export default function App() {
                 <div className="panel-cell"><span>状态</span><b>就绪</b></div>
               </div>
             </div>
-          : <div className="messages">{messages.map(m =>
+          : <div className="messages">{messages.map((m, idx) => {
+              const isLast = idx === messages.length - 1;
+              const isEditing = editingMsgId === m.id;
+              return (
               <article id={`msg-${m.id}`} className={`message ${m.role}`} key={m.id}>
                 <div className="msg-meta">
                   <span className="msg-who">{m.role === "user" ? "你" : "AGENT"}</span>
                   <span className="msg-time">{fmtTime(m.created_at)}</span>
+                  {m.content && (
+                    <button className="msg-copy" type="button" onClick={() => void copyMessage(m)}>
+                      {copiedId === m.id ? "已复制" : "复制"}
+                    </button>
+                  )}
                 </div>
                 <div className="body">
                   {m.role === "user"
-                    ? (<>
-                        {m.content && <p className="user-text">{m.content}</p>}
-                        {m.attachments && m.attachments.length > 0 && (
-                          <div className="attachments">
-                            {m.attachments.map((a, i) => a.content_type.startsWith("image/")
-                              ? <a key={i} className="attachment-image" href={a.url} target="_blank" rel="noreferrer"><img src={a.url} alt={a.name} /></a>
-                              : <a key={i} className="attachment-file" href={a.url} target="_blank" rel="noreferrer">📄 {a.name}</a>
-                            )}
+                    ? isEditing
+                      ? (<div className="edit-box">
+                          <textarea autoFocus value={editDraft}
+                            onChange={e => setEditDraft(e.target.value)}
+                            onKeyDown={e => { if (e.key === "Escape") cancelEditMessage(); }} />
+                          <div className="edit-actions">
+                            <button type="button" onClick={cancelEditMessage}>取消</button>
+                            <button type="button" className="primary" disabled={busy || !editDraft.trim()}
+                              onClick={() => void regenerate(m.id, editDraft.trim())}>保存并重新生成</button>
                           </div>
-                        )}
-                      </>)
+                        </div>)
+                      : (<>
+                          {m.content && <p className="user-text">{m.content}</p>}
+                          {m.attachments && m.attachments.length > 0 && (
+                            <div className="attachments">
+                              {m.attachments.map((a, i) => a.content_type.startsWith("image/")
+                                ? <a key={i} className="attachment-image" href={a.url} target="_blank" rel="noreferrer"><img src={a.url} alt={a.name} /></a>
+                                : <a key={i} className="attachment-file" href={a.url} target="_blank" rel="noreferrer">📄 {a.name}</a>
+                              )}
+                            </div>
+                          )}
+                          {isLast && !busy && (
+                            <div className="msg-actions">
+                              <button className="msg-action" type="button" onClick={() => startEditMessage(m)}>编辑</button>
+                            </div>
+                          )}
+                        </>)
                     : (<>
                         {m.content ? <Markdown content={m.content} />
                           : <span className="thinking">{busy ? "正在思考…" : ""}</span>}
@@ -275,10 +389,16 @@ export default function App() {
                             ))}
                           </div>
                         )}
+                        {isLast && !busy && m.content && lastUserMsg && (
+                          <div className="msg-actions">
+                            <button className="msg-action" type="button" onClick={() => void regenerate(lastUserMsg.id)}>重新生成</button>
+                          </div>
+                        )}
                       </>)}
                 </div>
               </article>
-            )}</div>}
+              );
+            })}</div>}
       </section>
 
       <div className="composer-wrap">

@@ -1,7 +1,7 @@
 """消息数据读写。"""
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from agent_platform.infrastructure.database.models import Message
@@ -29,6 +29,9 @@ class MessageRepository:
         self.db.refresh(message)
         return message
 
+    def get(self, message_id: int) -> Message | None:
+        return self.db.get(Message, message_id)
+
     def list_by_conversation(self, conversation_id: int) -> list[Message]:
         stmt = (
             select(Message)
@@ -36,3 +39,13 @@ class MessageRepository:
             .order_by(Message.created_at, Message.id)
         )
         return list(self.db.scalars(stmt))
+
+    def delete_from(self, conversation_id: int, message_id: int) -> None:
+        """删除某条消息及其之后的所有消息（用于「重新生成」从该处重跑）。"""
+        self.db.execute(
+            delete(Message).where(
+                Message.conversation_id == conversation_id,
+                Message.id >= message_id,
+            )
+        )
+        self.db.commit()

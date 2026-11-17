@@ -22,7 +22,7 @@ class ConversationRepository:
         stmt = (
             select(Conversation)
             .where(Conversation.user_id == user_id)
-            .order_by(Conversation.updated_at.desc())
+            .order_by(Conversation.pinned.desc(), Conversation.updated_at.desc())
         )
         return list(self.db.scalars(stmt))
 
@@ -37,6 +37,26 @@ class ConversationRepository:
         self.db.commit()
         self.db.refresh(conversation)
         return conversation
+
+    def update(self, conversation_id: int, title: str | None = None, pinned: bool | None = None) -> Conversation | None:
+        conversation = self.db.get(Conversation, conversation_id)
+        if conversation is None:
+            return None
+        if title is not None:
+            conversation.title = title
+        if pinned is not None:
+            conversation.pinned = pinned
+        self.db.commit()
+        self.db.refresh(conversation)
+        return conversation
+
+    def delete(self, conversation_id: int) -> bool:
+        conversation = self.db.get(Conversation, conversation_id)
+        if conversation is None:
+            return False
+        self.db.delete(conversation)
+        self.db.commit()
+        return True
 
     def touch(self, conversation_id: int) -> None:
         """更新 updated_at，使最近有消息的会话排到列表顶部。"""
