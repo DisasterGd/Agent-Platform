@@ -14,6 +14,26 @@
   --sans:"IBM Plex Sans","PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,-apple-system,sans-serif;
   --mono:"IBM Plex Mono","SFMono-Regular",Consolas,"Liberation Mono",monospace;
 }
+:root[data-theme="dark"]{
+  --paper:#1B1D21;
+  --paper-raised:#24262B;
+  --paper-deep:#15171A;
+  --ink:#E8E6DF;
+  --ink-soft:#A9ACB3;
+  --ink-faint:#6E7178;
+  --line:#32353B;
+  --line-strong:#464A51;
+  --signal:#E05244;
+  --signal-deep:#C03A2E;
+  --ok:#5FA17A;
+}
+/* 深色下代码块/流程图保持浅色纸张，保证语法高亮与黑白图可读 */
+:root[data-theme="dark"] .codeblock,
+:root[data-theme="dark"] .mermaid,
+:root[data-theme="dark"] .mermaid-fallback{background:#F7F6F2;color:#1C1E24;border-color:#4A4D54}
+:root[data-theme="dark"] .codeblock-head,
+:root[data-theme="dark"] .mermaid-fallback span{background:#ECE9E0;color:#555960}
+:root[data-theme="dark"] .md-inline-code{background:#3A3D44;color:#FF8A7A}
 *{box-sizing:border-box}
 html,body,#root{height:100%}
 body{margin:0;min-width:320px;overflow:hidden;font-family:var(--sans);color:var(--ink);background:var(--paper);font-synthesis:none;-webkit-font-smoothing:antialiased}
@@ -193,6 +213,37 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
 .chip-file{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chip button{border:0;background:transparent;color:var(--ink-faint);font-size:15px;line-height:1;padding:2px 4px;border-radius:3px}
 .chip button:hover{background:var(--paper-deep);color:var(--ink)}
+
+/* 设置按钮 */
+.settings-btn{border:1px solid var(--line);border-radius:4px;background:transparent;color:var(--ink-soft);font-size:12px;padding:5px 10px;font-family:var(--mono)}
+.settings-btn:hover{color:var(--ink);border-color:var(--line-strong)}
+
+/* 设置弹窗 */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal{width:min(440px,100%);max-height:88vh;overflow-y:auto;background:var(--paper-raised);border:1px solid var(--line);border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--line)}
+.modal-title{font-size:16px;font-weight:600}
+.modal-close{border:0;background:transparent;color:var(--ink-faint);font-size:22px;line-height:1;padding:0 4px}
+.modal-close:hover{color:var(--ink)}
+.modal-body{padding:20px}
+.set-section{margin-bottom:26px}
+.set-section:last-child{margin-bottom:0}
+.set-section h3{margin:0 0 12px;font-size:13px;font-weight:600;color:var(--ink-soft)}
+.theme-toggle{display:flex;gap:8px}
+.theme-toggle button{flex:1;padding:9px 12px;border:1px solid var(--line);border-radius:4px;background:transparent;color:var(--ink-soft);font-size:13px}
+.theme-toggle button.on{border-color:var(--signal);color:var(--signal);background:rgba(198,60,44,.06)}
+.preset-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+.preset{padding:7px 12px;border:1px solid var(--line);border-radius:4px;background:transparent;color:var(--ink-soft);font-size:12px}
+.preset.on{border-color:var(--signal);color:var(--signal);background:rgba(198,60,44,.06)}
+.field{display:block;margin-bottom:12px}
+.field span{display:block;margin-bottom:5px;font-family:var(--mono);font-size:11px;color:var(--ink-faint)}
+.field input{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:4px;background:var(--paper);color:var(--ink);font-size:13px;outline:0}
+.field input:focus{border-color:var(--ink)}
+.api-link{display:inline-block;margin:2px 0 14px;color:var(--ink-soft);font-size:12px;text-decoration:underline;text-underline-offset:3px}
+.api-link:hover{color:var(--signal)}
+.save-btn{width:100%;padding:10px;border:0;border-radius:4px;color:#fff;background:var(--signal);font-size:13px;font-weight:500}
+.save-btn:hover{background:var(--signal-deep)}
+.save-btn:disabled{opacity:.5;cursor:not-allowed}
 
 /* 问题索引仅在宽屏显示，避免与阅读列重叠 */
 @media(max-width:1200px){

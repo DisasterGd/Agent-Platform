@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { chatApi } from "./services/chat";
 import Markdown from "./components/Markdown";
+import SettingsModal from "./components/SettingsModal";
 import type { Artifact, Attachment, Conversation, Message } from "./types/chat";
 
 const TOOL_LABELS: Record<string, string> = {
@@ -29,6 +30,16 @@ export default function App() {
   const [draftTitle, setDraftTitle] = useState("");
   const cancelRename = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    try { return (localStorage.getItem("theme") as "light" | "dark") || "light"; }
+    catch { return "light"; }
+  });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem("theme", theme); } catch { /* 忽略存储失败 */ }
+  }, [theme]);
 
   const refresh = useCallback(async () => {
     const items = await chatApi.listConversations();
@@ -114,10 +125,11 @@ export default function App() {
         setActiveId(id);
         await refresh();
       }
+      const sentAttachments = [...attachments];
       const userMessage: Message = {
         id: Date.now(), conversation_id: id, role: "user",
         content, created_at: new Date().toISOString(),
-        attachments: attachments.length ? [...attachments] : undefined,
+        attachments: sentAttachments.length ? sentAttachments : undefined,
       };
       const assistantId = Date.now() + 1;
       const assistantMessage: Message = {
@@ -127,7 +139,7 @@ export default function App() {
       setMessages(current => [...current, userMessage, assistantMessage]);
       setInput("");
       setAttachments([]);
-      await chatApi.streamMessage(id, content, {
+      await chatApi.streamMessage(id, content, sentAttachments, {
         onDelta: delta => {
           setMessages(current => current.map(m =>
             m.id === assistantId ? { ...m, content: m.content + delta } : m
@@ -200,6 +212,7 @@ export default function App() {
           <span className="meta-item">模型 <b>DeepSeek</b></span>
           <span className="meta-item">v0.2</span>
           <span className="meta-item"><span className="led" />就绪</span>
+          <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
       </header>
 
@@ -315,5 +328,9 @@ export default function App() {
         <p className="disclaimer">Agent 可能生成不准确的信息。重要内容请自行核实。</p>
       </div>
     </main>
+
+    {settingsOpen && (
+      <SettingsModal theme={theme} onThemeChange={setTheme} onClose={() => setSettingsOpen(false)} />
+    )}
   </div>;
 }
