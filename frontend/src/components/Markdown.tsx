@@ -1,14 +1,23 @@
-import { memo, useDeferredValue, useEffect, useRef, useState } from "react";
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import katex from "katex";
 import "katex/dist/katex.min.css";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 let mermaidSeq = 0;
+
+/** 把 LaTeX 标准定界符 \(...\) / \[...\] 归一化为 remark-math 认识的 $...$ / $$...$$。
+ *  必须在 remark-math 解析前对原始文本做，否则转换后的 $ 不会被重新解析。 */
+function normalizeLatex(content: string): string {
+  return content
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_m: string, x: string) => `$$\n${x}\n$$`)
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_m: string, x: string) => `$${x}$`);
+}
 
 /** 代码块：带语言标签 + 复制按钮，流式输出时用 useDeferredValue 让高亮“追赶”而非阻塞。 */
 const CodeBlock = memo(function CodeBlock({ language, code }: { language: string; code: string }) {
@@ -41,6 +50,21 @@ const CodeBlock = memo(function CodeBlock({ language, code }: { language: string
       </SyntaxHighlighter>
     </div>
   );
+});
+
+/** 独立公式块（```math 代码块）用 KaTeX 渲染成显示公式（兜底，通常由 rehype-katex 处理）。 */
+const KatexBlock = memo(function KatexBlock({ tex }: { tex: string }) {
+  const html = useMemo(() => {
+    try {
+      return katex.renderToString(tex, { displayMode: true, throwOnError: false });
+    } catch {
+      return "";
+    }
+  }, [tex]);
+  if (!html) {
+    return <pre className="mermaid-fallback"><code>{tex}</code></pre>;
+  }
+  return <div className="katex-block" dangerouslySetInnerHTML={{ __html: html }} />;
 });
 
 /** Mermaid 流程图：流式期间未闭合/解析失败时回退为源码，闭合后再渲染成图。 */
@@ -100,6 +124,7 @@ const components: Components = {
     }
     const lang = match ? match[1].toLowerCase() : "";
     if (lang === "mermaid") return <Mermaid code={raw} />;
+    if (lang === "math" || lang === "latex" || lang === "tex") return <KatexBlock tex={raw} />;
     return <CodeBlock language={lang} code={raw} />;
   },
 };
@@ -107,8 +132,12 @@ const components: Components = {
 export default memo(function Markdown({ content }: { content: string }) {
   return (
     <div className="markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>
-        {content}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={components}
+      >
+        {normalizeLatex(content)}
       </ReactMarkdown>
     </div>
   );
