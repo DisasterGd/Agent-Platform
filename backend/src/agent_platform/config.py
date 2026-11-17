@@ -25,8 +25,9 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.7
 
     # 联网搜索（tools/builtin/search.py 调用）
-    # search_provider: duckduckgo（默认，零配置）| tavily | bing（后两者需 search_api_key）
-    search_provider: str = "duckduckgo"
+    # search_provider: auto（默认，DuckDuckGo → Bing 网页兜底，零配置）| duckduckgo | bing_scrape | bing | tavily
+    # bing / tavily 需要 search_api_key
+    search_provider: str = "auto"
     search_api_key: str = ""
     search_max_results: int = 5
 
