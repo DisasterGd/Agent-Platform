@@ -11,8 +11,19 @@ class MessageRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def add(self, conversation_id: int, role: str, content: str) -> Message:
-        message = Message(conversation_id=conversation_id, role=role, content=content)
+    def add(
+        self,
+        conversation_id: int,
+        role: str,
+        content: str,
+        attachments: list | None = None,
+    ) -> Message:
+        message = Message(
+            conversation_id=conversation_id,
+            role=role,
+            content=content,
+            attachments=attachments,
+        )
         self.db.add(message)
         self.db.commit()
         self.db.refresh(message)

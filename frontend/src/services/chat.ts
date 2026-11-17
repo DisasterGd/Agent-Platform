@@ -43,11 +43,11 @@ export const chatApi = {
     return { name: json.filename, url: json.url, content_type: json.content_type };
   },
 
-  async streamMessage(id: number, content: string, handlers: StreamHandlers) {
+  async streamMessage(id: number, content: string, attachments: Attachment[], handlers: StreamHandlers) {
     const response = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation_id: id, content }),
+      body: JSON.stringify({ conversation_id: id, content, attachments }),
     });
     if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
     if (!response.body) throw new Error("浏览器不支持响应流");

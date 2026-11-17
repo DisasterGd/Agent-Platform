@@ -38,11 +38,19 @@ class MessageOut(BaseModel):
     role: str
     content: str
     created_at: datetime
+    attachments: list | None = None
+
+
+class AttachmentIn(BaseModel):
+    name: str
+    url: str
+    content_type: str = ""
 
 
 class ChatStreamIn(BaseModel):
     conversation_id: int
     content: str
+    attachments: list[AttachmentIn] = []
 
 
 @router.get("/conversations", response_model=list[ConversationOut])
@@ -89,7 +97,11 @@ async def stream_chat(body: ChatStreamIn, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="会话不存在")
 
     async def event_stream() -> AsyncIterator[str]:
-        async for event in service.stream_reply(body.conversation_id, body.content):
+        async for event in service.stream_reply(
+            body.conversation_id,
+            body.content,
+            [a.model_dump() for a in body.attachments],
+        ):
             yield to_sse(event)
 
     return StreamingResponse(

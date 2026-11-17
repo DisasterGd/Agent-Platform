@@ -1,4 +1,4 @@
-"""聊天业务用例：会话管理 + 流式回复（v0.2 支持工具调用）。"""
+"""聊天业务用例：会话管理 + 流式回复（v0.2 工具调用，v0.3 附件）。"""
 from __future__ import annotations
 
 import asyncio
@@ -15,9 +15,14 @@ from agent_platform.core.events import (
     task_started,
     text_delta,
 )
+from agent_platform.infrastructure.attachments import (
+    extract_text,
+    image_to_data_uri,
+    parse_file_url,
+)
 from agent_platform.infrastructure.database.models import Conversation
-from agent_platform.models.base import ChatMessage
-from agent_platform.models.factory import create_model
+from agent_platform.models.base import ChatMessage, ImagePart
+from agent_platform.models.factory import create_model, create_vision_model
 from agent_platform.repositories.conversations import ConversationRepository
 from agent_platform.repositories.messages import MessageRepository
 from agent_platform.tools.builtin.registry import build_default_registry
@@ -27,6 +32,8 @@ TITLE_SYSTEM_PROMPT = (
     "你是会话标题生成器。根据用户的问题，输出一个不超过 12 个汉字的中文标题，"
     "概括对话主题。只输出标题本身，不要引号、标点或任何解释。"
 )
+
+VISION_PROMPT = "请用简洁的中文描述这张图片的内容。"
 
 
 class ChatService:
@@ -77,14 +84,62 @@ class ChatService:
             title = text[:20] + ("…" if len(text) > 20 else "")
         self.conversations.update_title(conversation_id, title)
 
-    async def stream_reply(self, conversation_id: int, content: str) -> AsyncIterator[Event]:
+    async def _describe_image(self, category: str, stored_name: str, content_type: str) -> str | None:
+        """用视觉模型描述图片；未配置视觉模型时返回 None。"""
+        vision = create_vision_model()
+        if vision is None:
+            return None
+        data_uri = image_to_data_uri(category, stored_name, content_type)
+        if data_uri is None:
+            return None
+        try:
+            return await vision.complete(
+                [ChatMessage(role="user", content=VISION_PROMPT, images=[ImagePart(url=data_uri)])]
+            )
+        except Exception:  # noqa: BLE001 — 识图失败不影响主流程
+            return None
+
+    async def _enrich(self, content: str, attachments: list[dict]) -> str:
+        """把附件正文/识图结果拼进用户消息，供模型读取。"""
+        parts: list[str] = [content]
+        for att in attachments:
+            parsed = parse_file_url(att.get("url", ""))
+            if parsed is None:
+                continue
+            category, stored_name = parsed
+            content_type = att.get("content_type", "")
+            name = att.get("name", stored_name)
+            if content_type.startswith("image/"):
+                description = await self._describe_image(category, stored_name, content_type)
+                if description:
+                    parts.append(f"\n\n[图片 {name}]\n{description}")
+            else:
+                text = extract_text(category, stored_name, content_type)
+                if text:
+                    parts.append(f"\n\n[附件 {name}]\n{text}")
+        return "\n".join(parts)
+
+    async def stream_reply(
+        self,
+        conversation_id: int,
+        content: str,
+        attachments: list[dict] | None = None,
+    ) -> AsyncIterator[Event]:
         yield task_started()
 
-        # 先落库用户消息，再带着完整历史调用模型
-        self.messages.add(conversation_id, "user", content)
+        attachments = attachments or []
+        enriched = await self._enrich(content, attachments)
+
+        # 落库保存原始内容 + 附件元数据，供前端展示与刷新后回显
+        self.messages.add(conversation_id, "user", content, attachments=attachments)
         self.conversations.touch(conversation_id)
+
         history = self.messages.list_by_conversation(conversation_id)
-        chat_messages = build_context([(m.role, m.content) for m in history])
+        pairs = [(m.role, m.content) for m in history]
+        # 最后一条为刚插入的用户消息，用附带的文件正文/识图结果增强后发给模型
+        if pairs and pairs[-1][0] == "user":
+            pairs[-1] = ("user", enriched)
+        chat_messages = build_context(pairs)
 
         parts: list[str] = []
         try:
