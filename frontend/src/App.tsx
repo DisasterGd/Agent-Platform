@@ -11,6 +11,36 @@ const TOOL_LABELS: Record<string, string> = {
 
 type ToolEntry = { name: string; state: "running" | "done" };
 
+/** 版本链分组结果：同一 group 的多个消息变体合并为一个气泡，可左右翻页。 */
+type Turn = { key: number; role: "user" | "assistant"; items: Message[] };
+
+function buildTurns(msgs: Message[]): Turn[] {
+  const order: Turn[] = [];
+  const byKey = new Map<number, Turn>();
+  for (const m of msgs) {
+    const key = m.group_id ?? m.id;
+    let turn = byKey.get(key);
+    if (!turn) {
+      turn = { key, role: m.role, items: [] };
+      byKey.set(key, turn);
+      order.push(turn);
+    }
+    turn.items.push(m);
+  }
+  for (const t of order) {
+    t.items.sort((a, b) => (a.variant_index ?? 0) - (b.variant_index ?? 0) || a.id - b.id);
+  }
+  return order;
+}
+
+/** 该气泡当前选看的版本；默认（未翻页）为最新一版。 */
+function selectedVersion(selMap: Record<number, number>, turn: Turn): number {
+  const stored = selMap[turn.key];
+  const last = turn.items.length - 1;
+  if (stored === undefined || stored < 0) return last;
+  return Math.min(stored, last);
+}
+
 function fmtTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
@@ -32,6 +62,7 @@ export default function App() {
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [editingMsgId, setEditingMsgId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  const [versionSel, setVersionSel] = useState<Record<number, number>>({});
   const cancelRename = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [theme, setTheme] = useState<"light" | "dark">(() => {
@@ -53,6 +84,7 @@ export default function App() {
 
   const load = useCallback(async (id: number) => {
     setActiveId(id);
+    setVersionSel({});
     setMessages(await chatApi.listMessages(id));
   }, []);
 
@@ -186,6 +218,7 @@ export default function App() {
       setInput("");
       setAttachments([]);
       await chatApi.streamMessage(id, content, sentAttachments, streamHandlers(assistantId));
+      await load(id); // 用服务端权威数据回填 id / 版本链字段
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "发送消息失败");
@@ -199,30 +232,42 @@ export default function App() {
 
   async function regenerate(userMessageId: number, newContent?: string) {
     if (busy || activeId === null) return;
-    const idx = messages.findIndex(m => m.id === userMessageId);
-    if (idx < 0) return;
-    const original = messages[idx];
+    const raw = messages.find(m => m.id === userMessageId);
+    if (!raw) return;
     const convId = activeId;
+    const trimmed = newContent?.trim();
+    const edited = trimmed !== undefined && trimmed !== "" && trimmed !== raw.content;
     setError("");
     setBusy(true);
     setToolLog([]);
     setEditingMsgId(null);
     setEditDraft("");
-    const assistantId = Date.now() + 1;
+
+    // 乐观追加新版本行（同链 group_id），旧版本保留在链内可翻页；流结束后用服务端数据回填
+    const turnsNow = buildTurns(messages);
+    const lastTurn = turnsNow[turnsNow.length - 1];
+    const asstTurn = lastTurn && lastTurn.role === "assistant" ? lastTurn : null;
+    const maxIdx = (items: Message[]) => items.reduce((acc, m) => Math.max(acc, m.variant_index ?? 0), 0);
+    const userGroup = raw.group_id ?? raw.id;
+    const stamp = Date.now();
+    const userVariant: Message | null = edited
+      ? {
+          id: stamp, conversation_id: convId, role: "user", content: trimmed!,
+          created_at: new Date().toISOString(), attachments: raw.attachments,
+          group_id: userGroup, variant_index: maxIdx(turnsNow.find(t => t.key === userGroup)?.items ?? []) + 1,
+        }
+      : null;
+    const assistantId = stamp + 1;
+    const assistantMessage: Message = {
+      id: assistantId, conversation_id: convId, role: "assistant",
+      content: "", created_at: new Date().toISOString(), artifacts: [],
+      group_id: asstTurn?.key, variant_index: asstTurn ? maxIdx(asstTurn.items) + 1 : 0,
+    };
     try {
-      const base = newContent !== undefined
-        ? [...messages.slice(0, idx), {
-            id: Date.now(), conversation_id: convId, role: "user" as const,
-            content: newContent, created_at: new Date().toISOString(),
-            attachments: original.attachments,
-          }]
-        : [...messages.slice(0, idx), original];
-      const assistantMessage: Message = {
-        id: assistantId, conversation_id: convId, role: "assistant",
-        content: "", created_at: new Date().toISOString(), artifacts: [],
-      };
-      setMessages([...base, assistantMessage]);
+      setMessages(current => [...current, ...(userVariant ? [userVariant] : []), assistantMessage]);
+      setVersionSel({});
       await chatApi.regenerate(convId, userMessageId, newContent, streamHandlers(assistantId));
+      await load(convId);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "重新生成失败");
@@ -232,9 +277,9 @@ export default function App() {
     }
   }
 
-  function startEditMessage(m: Message) {
-    setEditingMsgId(m.id);
-    setEditDraft(m.content);
+  function startEditMessage(turn: Turn, row: Message) {
+    setEditingMsgId(turn.key);
+    setEditDraft(row.content);
   }
 
   function cancelEditMessage() {
@@ -256,9 +301,10 @@ export default function App() {
     document.getElementById(`msg-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  const questions = messages.filter(m => m.role === "user" && m.content.trim());
+  const turns = buildTurns(messages);
+  const questions = turns.filter(t => t.role === "user" && t.items[t.items.length - 1].content.trim());
   const activeConv = conversations.find(c => c.id === activeId);
-  const lastUserMsg = [...messages].reverse().find(m => m.role === "user");
+  const lastUserTurn = [...turns].reverse().find(t => t.role === "user");
   const visible = conversations.filter(c => {
     const kw = search.trim().toLowerCase();
     return !kw || c.title.toLowerCase().includes(kw);
@@ -300,7 +346,7 @@ export default function App() {
         <div className="topbar-title">{activeConv?.title ?? "新会话"}</div>
         <div className="topbar-meta">
           <span className="meta-item">模型 <b>DeepSeek</b></span>
-          <span className="meta-item">v0.2.5</span>
+          <span className="meta-item">v0.2.6</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
@@ -310,18 +356,21 @@ export default function App() {
         <aside className="index">
           <div className="index-head"><span>问题索引</span><em>{questions.length}</em></div>
           <div className="index-list">
-            {questions.map((q, i) => (
-              <button key={q.id} className="index-item" title={q.content} onClick={() => jumpTo(q.id)}>
+            {questions.map((q, i) => {
+              const latest = q.items[q.items.length - 1];
+              return (
+              <button key={q.key} className="index-item" title={latest.content} onClick={() => jumpTo(q.key)}>
                 <span className="index-num">{i + 1}</span>
-                <span className="index-label">{q.content.replace(/\s+/g, " ").trim().slice(0, 18) || "…"}</span>
+                <span className="index-label">{latest.content.replace(/\s+/g, " ").trim().slice(0, 18) || "…"}</span>
               </button>
-            ))}
+              );
+            })}
           </div>
         </aside>
       )}
 
       <section className="chat-area">
-        {messages.length === 0
+        {turns.length === 0
           ? <div className="welcome">
               <div className="welcome-mark">◉</div>
               <h2>从一个想法开始</h2>
@@ -332,22 +381,35 @@ export default function App() {
                 <div className="panel-cell"><span>状态</span><b>就绪</b></div>
               </div>
             </div>
-          : <div className="messages">{messages.map((m, idx) => {
-              const isLast = idx === messages.length - 1;
-              const isEditing = editingMsgId === m.id;
+          : <div className="messages">{turns.map((t, ti) => {
+              const isLastTurn = ti === turns.length - 1;
+              const sel = selectedVersion(versionSel, t);
+              const row = t.items[sel];
+              const hasVariants = t.items.length > 1;
+              const isEditing = editingMsgId === t.key;
+              // 版本翻页器：同一逻辑消息有多个版本（重新生成/编辑产生）时显示“‹ n/N ›”
+              const pager = hasVariants && (
+                <span className="msg-versions" title="该消息有多个版本，可左右翻页查看">
+                  <button type="button" aria-label="上一版本" disabled={sel <= 0}
+                    onClick={() => setVersionSel(v => ({ ...v, [t.key]: Math.max(0, selectedVersion(v, t) - 1) }))}>‹</button>
+                  <em>{sel + 1}/{t.items.length}</em>
+                  <button type="button" aria-label="下一版本" disabled={sel >= t.items.length - 1}
+                    onClick={() => setVersionSel(v => ({ ...v, [t.key]: Math.min(t.items.length - 1, selectedVersion(v, t) + 1) }))}>›</button>
+                </span>
+              );
               return (
-              <article id={`msg-${m.id}`} className={`message ${m.role}`} key={m.id}>
+              <article id={`msg-${t.key}`} className={`message ${t.role}`} key={t.key}>
                 <div className="msg-meta">
-                  <span className="msg-who">{m.role === "user" ? "你" : "AGENT"}</span>
-                  <span className="msg-time">{fmtTime(m.created_at)}</span>
-                  {m.content && (
-                    <button className="msg-copy" type="button" onClick={() => void copyMessage(m)}>
-                      {copiedId === m.id ? "已复制" : "复制"}
+                  <span className="msg-who">{t.role === "user" ? "你" : "AGENT"}</span>
+                  <span className="msg-time">{fmtTime(row.created_at)}</span>
+                  {row.content && (
+                    <button className="msg-copy" type="button" onClick={() => void copyMessage(row)}>
+                      {copiedId === row.id ? "已复制" : "复制"}
                     </button>
                   )}
                 </div>
                 <div className="body">
-                  {m.role === "user"
+                  {t.role === "user"
                     ? isEditing
                       ? (<div className="edit-box">
                           <textarea autoFocus value={editDraft}
@@ -356,31 +418,34 @@ export default function App() {
                           <div className="edit-actions">
                             <button type="button" onClick={cancelEditMessage}>取消</button>
                             <button type="button" className="primary" disabled={busy || !editDraft.trim()}
-                              onClick={() => void regenerate(m.id, editDraft.trim())}>保存并重新生成</button>
+                              onClick={() => void regenerate(row.id, editDraft.trim())}>保存并重新生成</button>
                           </div>
                         </div>)
                       : (<>
-                          {m.content && <p className="user-text">{m.content}</p>}
-                          {m.attachments && m.attachments.length > 0 && (
+                          {row.content && <p className="user-text">{row.content}</p>}
+                          {row.attachments && row.attachments.length > 0 && (
                             <div className="attachments">
-                              {m.attachments.map((a, i) => a.content_type.startsWith("image/")
+                              {row.attachments.map((a, i) => a.content_type.startsWith("image/")
                                 ? <a key={i} className="attachment-image" href={a.url} target="_blank" rel="noreferrer"><img src={a.url} alt={a.name} /></a>
                                 : <a key={i} className="attachment-file" href={a.url} target="_blank" rel="noreferrer">📄 {a.name}</a>
                               )}
                             </div>
                           )}
-                          {isLast && !busy && (
+                          {(hasVariants || (isLastTurn && !busy)) && (
                             <div className="msg-actions">
-                              <button className="msg-action" type="button" onClick={() => startEditMessage(m)}>编辑</button>
+                              {pager}
+                              {isLastTurn && !busy && (
+                                <button className="msg-action" type="button" onClick={() => startEditMessage(t, row)}>编辑</button>
+                              )}
                             </div>
                           )}
                         </>)
                     : (<>
-                        {m.content ? <Markdown content={m.content} />
+                        {row.content ? <Markdown content={row.content} />
                           : <span className="thinking">{busy ? "正在思考…" : ""}</span>}
-                        {m.artifacts && m.artifacts.length > 0 && (
+                        {row.artifacts && row.artifacts.length > 0 && (
                           <div className="artifacts">
-                            {m.artifacts.map((a, i) => (
+                            {row.artifacts.map((a, i) => (
                               <a key={i} className="artifact" href={a.url} download={a.filename} target="_blank" rel="noreferrer">
                                 <span className="artifact-icon">📄</span>
                                 <span className="artifact-name">{a.filename}</span>
@@ -389,9 +454,13 @@ export default function App() {
                             ))}
                           </div>
                         )}
-                        {isLast && !busy && m.content && lastUserMsg && (
+                        {(hasVariants || (isLastTurn && !busy && row.content && lastUserTurn)) && (
                           <div className="msg-actions">
-                            <button className="msg-action" type="button" onClick={() => void regenerate(lastUserMsg.id)}>重新生成</button>
+                            {pager}
+                            {isLastTurn && !busy && row.content && lastUserTurn && (
+                              <button className="msg-action" type="button"
+                                onClick={() => void regenerate(lastUserTurn.items[selectedVersion(versionSel, lastUserTurn)].id)}>重新生成</button>
+                            )}
                           </div>
                         )}
                       </>)}

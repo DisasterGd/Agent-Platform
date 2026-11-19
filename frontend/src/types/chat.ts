@@ -27,6 +27,9 @@ export interface Message {
   created_at: string;
   attachments?: Attachment[];
   artifacts?: Artifact[];
+  /** 版本链：同一逻辑消息（重新生成/编辑的多个版本）共享 group_id，组内 variant_index 递增。 */
+  group_id?: number;
+  variant_index?: number;
 }
 
 export interface StreamEvent {

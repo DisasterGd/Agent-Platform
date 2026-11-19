@@ -138,6 +138,13 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
 .msg-actions{display:flex;gap:8px;margin-top:10px}
 .msg-action{border:1px solid var(--line);border-radius:3px;background:transparent;color:var(--ink-faint);font-size:12px;padding:3px 10px;font-family:var(--mono)}
 .msg-action:hover{color:var(--ink);border-color:var(--line-strong)}
+
+/* 重新生成版本翻页器（‹ n/N ›） */
+.msg-versions{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line);border-radius:3px;padding:0 4px;font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
+.msg-versions button{border:0;background:transparent;color:var(--ink-faint);font-size:14px;line-height:1;padding:4px 6px;cursor:pointer}
+.msg-versions button:hover:not(:disabled){color:var(--ink)}
+.msg-versions button:disabled{opacity:.35;cursor:not-allowed}
+.msg-versions em{font-style:normal;min-width:36px;text-align:center;letter-spacing:.04em}
 .edit-box{display:flex;flex-direction:column;gap:10px}
 .edit-box textarea{width:100%;min-height:80px;resize:vertical;padding:10px 12px;border:1px solid var(--signal);border-radius:3px;background:var(--paper-raised);color:var(--ink);font-size:15px;line-height:1.7;outline:0;font-family:inherit}
 .edit-actions{display:flex;gap:8px;justify-content:flex-end}
