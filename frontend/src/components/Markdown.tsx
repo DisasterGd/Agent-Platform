@@ -19,6 +19,26 @@ function normalizeLatex(content: string): string {
     .replace(/\\\(([\s\S]*?)\\\)/g, (_m: string, x: string) => `$${x}$`);
 }
 
+/** 段落级奇数 $ 保护：旧数据里失配的定界符会让 $ 跨句错位配对，把整段中文吞进一个数学节点，
+ *  KaTeX 随即整段标红（ParseError: Can't use function '$' in math mode）。
+ *  若某个以空行分隔的块内未转义 $ 的数量为奇数，则定界符必然失配——把段内 $ 全部转义为字面量，
+ *  宁可退化为显示原始文本，也不让公式错误污染整段。围栏代码块不参与配对，须原样保留。 */
+function guardUnbalancedDollars(content: string): string {
+  const guardParagraphs = (text: string): string =>
+    text
+      .split(/\n{2,}/)
+      .map(block => {
+        let count = 0;
+        for (let i = 0; i < block.length; i++) {
+          if (block[i] === "$" && block[i - 1] !== "\\") count += 1;
+        }
+        return count % 2 === 1 ? block.replace(/(?<!\\)\$/g, "\\$") : block;
+      })
+      .join("\n\n");
+  // 以 ``` 围栏切分：奇数段是代码块，原样保留（代码里的 $ 不参与公式配对）
+  return content.split(/(```[\s\S]*?(?:```|$))/g).map((part, i) => (i % 2 === 1 ? part : guardParagraphs(part))).join("");
+}
+
 /** 代码块：带语言标签 + 复制按钮，流式输出时用 useDeferredValue 让高亮“追赶”而非阻塞。 */
 const CodeBlock = memo(function CodeBlock({ language, code }: { language: string; code: string }) {
   const deferredCode = useDeferredValue(code);
@@ -134,10 +154,10 @@ export default memo(function Markdown({ content }: { content: string }) {
     <div className="markdown">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: "#cc0000", strict: false }]]}
         components={components}
       >
-        {normalizeLatex(content)}
+        {guardUnbalancedDollars(normalizeLatex(content))}
       </ReactMarkdown>
     </div>
   );
