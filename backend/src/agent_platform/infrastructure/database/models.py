@@ -44,5 +44,9 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text)
     attachments: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 版本链：同一逻辑消息（重新生成/编辑产生的多个版本）共享 group_id，组内按 variant_index 递增。
+    # 首版的 group_id 为自身 id（由仓储在插入后回填），旧数据由迁移脚本回填。
+    group_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    variant_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")

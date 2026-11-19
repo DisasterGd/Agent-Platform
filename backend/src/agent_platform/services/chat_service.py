@@ -81,16 +81,55 @@ class ChatService:
         message_id: int,
         new_content: str | None = None,
     ) -> AsyncIterator[Event]:
-        """重新生成某条用户提问之后的回复（可选替换该提问内容）。"""
+        """重新生成某条用户提问之后的回复（可选替换该提问内容）。
+
+        不再删除旧内容：提问与回复都按版本链（group_id + variant_index）累积保存，
+        历史版本在前端可左右翻页查看。仅支持「最后一轮」重新生成，
+        避免会话中途重跑导致后续消息与新版本脱节（分支化留待后续版本）。
+        """
         target = self.messages.get(message_id)
         if target is None or target.conversation_id != conversation_id or target.role != "user":
             yield error("要重新生成的消息不存在或不是用户提问")
             return
         content = new_content.strip() if new_content is not None and new_content.strip() else target.content
         attachments = target.attachments or []
-        # 删除该用户消息及其之后的所有消息，再按（可能编辑过的）内容重跑
-        self.messages.delete_from(conversation_id, message_id)
-        async for event in self.stream_reply(conversation_id, content, attachments):
+
+        active = self.messages.list_active_by_conversation(conversation_id)
+        group = target.group_id or target.id
+        pos = next((i for i, m in enumerate(active) if (m.group_id or m.id) == group), None)
+        if pos is None:
+            yield error("要重新生成的消息不存在")
+            return
+        tail = active[pos + 1:]
+        if any(m.role != "assistant" for m in tail):
+            yield error("仅支持重新生成最后一轮的回复")
+            return
+        # 被替换的旧回复所属版本链：新回复作为它的下一个版本（若无旧回复则开新链）
+        assistant_group = (tail[-1].group_id or tail[-1].id) if tail else None
+
+        yield task_started()
+
+        # 提问变了也要保留原提问：作为同一版本链的新版本入库
+        latest = active[pos]
+        if content != latest.content:
+            self.messages.add(
+                conversation_id,
+                "user",
+                content,
+                attachments=attachments,
+                group_id=group,
+                variant_index=self.messages.next_variant_index(group),
+            )
+
+        enriched = await self._enrich(content, attachments)
+        self.conversations.touch(conversation_id)
+
+        # 上下文 = 此前各轮 + 本轮提问；丢弃待替换的旧回复，避免模型参照自己的旧答案
+        pairs = [(m.role, m.content) for m in active[:pos]]
+        pairs.append(("user", enriched))
+        async for event in self._stream_turn(
+            conversation_id, build_context(pairs), content, assistant_group_id=assistant_group
+        ):
             yield event
 
     async def _auto_title(self, conversation_id: int, content: str) -> None:
@@ -165,13 +204,23 @@ class ChatService:
         self.messages.add(conversation_id, "user", content, attachments=attachments)
         self.conversations.touch(conversation_id)
 
-        history = self.messages.list_by_conversation(conversation_id)
+        # 上下文取每个版本链的最新一条；最后一条为刚插入的用户消息，用附件正文/识图结果增强
+        history = self.messages.list_active_by_conversation(conversation_id)
         pairs = [(m.role, m.content) for m in history]
-        # 最后一条为刚插入的用户消息，用附带的文件正文/识图结果增强后发给模型
         if pairs and pairs[-1][0] == "user":
             pairs[-1] = ("user", enriched)
-        chat_messages = build_context(pairs)
 
+        async for event in self._stream_turn(conversation_id, build_context(pairs), content):
+            yield event
+
+    async def _stream_turn(
+        self,
+        conversation_id: int,
+        chat_messages: list[ChatMessage],
+        user_content: str,
+        assistant_group_id: int | None = None,
+    ) -> AsyncIterator[Event]:
+        """调用模型产出一次回复，并作为新消息（或旧回复的新版本）落库。"""
         parts: list[str] = []
         try:
             if self.model is not None:
@@ -181,7 +230,7 @@ class ChatService:
                         parts.append(event.data.get("content", ""))
                     yield event
             else:
-                async for token in self._demo_stream(content):
+                async for token in self._demo_stream(user_content):
                     parts.append(token)
                     yield text_delta(token)
         except Exception as exc:  # noqa: BLE001
@@ -190,8 +239,18 @@ class ChatService:
 
         reply = "".join(parts).strip()
         if reply:
-            self.messages.add(conversation_id, "assistant", reply)
-        await self._auto_title(conversation_id, content)
+            if assistant_group_id is not None:
+                # 重新生成：不覆盖旧回复，追加为同一版本链的下一个版本
+                self.messages.add(
+                    conversation_id,
+                    "assistant",
+                    reply,
+                    group_id=assistant_group_id,
+                    variant_index=self.messages.next_variant_index(assistant_group_id),
+                )
+            else:
+                self.messages.add(conversation_id, "assistant", reply)
+        await self._auto_title(conversation_id, user_content)
         yield task_completed()
 
     async def _demo_stream(self, user_text: str) -> AsyncIterator[str]:

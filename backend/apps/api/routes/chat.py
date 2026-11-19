@@ -41,6 +41,8 @@ class MessageOut(BaseModel):
     content: str
     created_at: datetime
     attachments: list | None = None
+    group_id: int | None = None
+    variant_index: int = 0
 
 
 class AttachmentIn(BaseModel):
