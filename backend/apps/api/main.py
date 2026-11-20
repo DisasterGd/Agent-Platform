@@ -8,7 +8,7 @@ from agent_platform.config import settings
 from apps.api.routes import auth, chat, files, health, knowledge, tasks
 from apps.api.routes import settings as settings_route
 
-app = FastAPI(title=settings.app_name, version="0.2.6")
+app = FastAPI(title=settings.app_name, version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
