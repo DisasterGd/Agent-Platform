@@ -4,6 +4,7 @@ Agent 核心、Service 与 API 层之间通过这些结构化事件传递流式�
 SSE 编码只发生在 API 层，核心层不依赖 HTTP 细节。
 
 v0.2 新增：工具调用与文件产出事件。
+v0.3 新增：任务规划与执行事件（plan_created / step_started / step_completed / step_failed）。
 """
 from __future__ import annotations
 
@@ -29,8 +30,8 @@ def task_started() -> Event:
     return Event("task_started")
 
 
-def task_completed() -> Event:
-    return Event("task_completed")
+def task_completed(data: dict[str, Any] | None = None) -> Event:
+    return Event("task_completed", data or {})
 
 
 def error(message: str) -> Event:
@@ -48,6 +49,23 @@ def tool_completed(name: str) -> Event:
 def artifact_ready(artifact: dict[str, Any]) -> Event:
     """Agent 生成了一个可下载文件。"""
     return Event("artifact_ready", artifact)
+
+
+def plan_created(steps: list[dict[str, Any]]) -> Event:
+    """v0.3：规划器产出了任务步骤计划（[{index,title,detail,status}...]）。"""
+    return Event("plan_created", {"steps": steps})
+
+
+def step_started(index: int, title: str) -> Event:
+    return Event("step_started", {"index": index, "title": title})
+
+
+def step_completed(index: int, summary: str, artifacts: list[dict[str, Any]] | None = None) -> Event:
+    return Event("step_completed", {"index": index, "summary": summary, "artifacts": artifacts or []})
+
+
+def step_failed(index: int, error: str) -> Event:
+    return Event("step_failed", {"index": index, "error": error})
 
 
 def to_sse(event: Event) -> str:

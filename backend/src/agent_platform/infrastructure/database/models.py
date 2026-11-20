@@ -50,3 +50,39 @@ class Message(Base):
     variant_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
+
+class Task(Base):
+    """v0.3 任务：目标 → 计划步骤 → 执行结果。status:
+    awaiting_approval / running / completed / failed / cancelled
+    """
+    __tablename__ = "tasks"
+    __table_args__ = (Index("ix_tasks_user_created", "user_id", "created_at"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    conversation_id: Mapped[int | None] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    goal: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(24), default="awaiting_approval", server_default="awaiting_approval")
+    # MySQL 的 TEXT 列不支持 DEFAULT：summary/error 仅用 Python 端默认值，建表由迁移管理
+    summary: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    steps: Mapped[list["TaskStep"]] = relationship(
+        back_populates="task", cascade="all, delete-orphan", order_by="TaskStep.idx"
+    )
+
+class TaskStep(Base):
+    """任务计划中的单个步骤。status: pending / running / done / failed"""
+    __tablename__ = "task_steps"
+    __table_args__ = (Index("ix_task_steps_task_idx", "task_id", "idx"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
+    idx: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    detail: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="pending", server_default="pending")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+    artifacts: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    task: Mapped["Task"] = relationship(back_populates="steps")

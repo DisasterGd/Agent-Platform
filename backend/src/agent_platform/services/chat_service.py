@@ -132,7 +132,7 @@ class ChatService:
         ):
             yield event
 
-    async def _auto_title(self, conversation_id: int, content: str) -> None:
+    async def ensure_title(self, conversation_id: int, content: str) -> None:
         """首条用户消息且标题仍为默认值时，用模型生成简洁标题（无模型则退化截断）。"""
         conversation = self.conversations.get(conversation_id)
         if conversation is None or conversation.title.strip() not in ("", "新会话"):
@@ -250,7 +250,7 @@ class ChatService:
                 )
             else:
                 self.messages.add(conversation_id, "assistant", reply)
-        await self._auto_title(conversation_id, user_content)
+        await self.ensure_title(conversation_id, user_content)
         yield task_completed()
 
     async def _demo_stream(self, user_text: str) -> AsyncIterator[str]:
