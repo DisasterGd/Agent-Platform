@@ -1,4 +1,4 @@
-# Agent Platform v0.2
+# Agent Platform v0.3
 
 本地优先的智能 Agent 平台：React + TypeScript + Vite、FastAPI、MySQL、SQLAlchemy 2.x、Alembic、SSE，默认接入 DeepSeek（OpenAI 兼容接口）。
 
@@ -15,11 +15,25 @@
 
 **v0.2（工具调用）**
 
-- Agent 工具调用循环（function calling）：模型可自动决定何时调用工具，最多 6 轮
-- 联网搜索工具 `web_search`：DuckDuckGo（默认）/ Tavily / Bing，改 `.env` 即可切换
-- 文件生成工具 `generate_file`：把模型输出的 Markdown 导出为 md / docx（Word）/ pdf
+- Agent 工具调用循环（function calling）：模型自动决定何时调用工具，最多 6 轮
+- 内置工具：`web_search`（联网搜索）、`fetch_url`（抓取搜索结果正文）、`generate_file`（Markdown 导出 md / docx / pdf）
 - 文件与图片上传/下载：`POST /api/files`、`GET /api/files/{category}/{name}`
+- 附件接入模型：文档正文提取、图片视觉理解（可配置独立的视觉模型）
+- 设置界面：模型预设 / 自定义 Base URL / API Key / 视觉模型；浅色与深色主题
+- 会话管理：置顶、重命名、删除、搜索；消息复制；编辑提问
+- **重新生成版本链**：每次重新生成/编辑都不再删除旧内容，按版本链保留（`group_id` + `variant_index`），气泡上 `‹ n/N ›` 左右翻页回看
+- Markdown 富渲染：LaTeX 公式（KaTeX，含定界符归一化与防错乱保护）、Mermaid 流程图、代码高亮 + 复制
 - 多模型供应商登记入口 `register_model_provider`，消息结构已支持图片（为多模态预留）
+
+**v0.3（任务规划与执行）**
+
+- 输入框「任务模式」显式开关：发送目标后先由 **Planner** 生成结构化步骤计划（JSON，≤6 步）
+- **先审阅再执行**：任务卡片上可编辑、增删步骤，确认后由 **Runner** 逐步执行，全程 SSE 流式汇报
+- 每一步的执行会带上"总体目标 + 完整计划 + 前序步骤结果"，复用 v0.2 的工具循环（可搜索、可生成文件）
+- **程序化校验**（模型声称完成 ≠ 真的完成）：步骤产出非空、声明生成的文件必须真实存在于磁盘，否则该步骤判失败并停止
+- 任务与步骤持久化：新增 `tasks` / `task_steps` 表，状态机 `awaiting_approval → running → completed / failed / cancelled`，支持计划编辑、取消、失败重试
+- 执行结果自动写回会话（无会话则懒创建），后续聊天可引用任务产出；刷新页面可恢复未收尾的任务卡片
+- 任务进度 UI：步骤状态点（待执行/执行中/完成/失败）、当前步骤流式输出、产物文件下载卡片
 
 当前开发用户 ID 仅用于本地单用户开发，不是身份认证；公网部署前必须实现真实认证和服务端权限校验。
 
@@ -28,7 +42,7 @@
 | 组件 | 版本 |
 | --- | --- |
 | Windows | 10/11 |
-| Python | **3.11 及以上（建议 3.12）** |
+| Python | **3.11 及以上（当前 `.venv` 为 3.12）** |
 | Node.js | 20.19+ 或 22.12+ |
 | MySQL | 8.x |
 | Git | 任意 |
@@ -80,8 +94,9 @@ Copy-Item .env.example .env
 编辑 `.env`：
 
 1. `DATABASE_URL` 里的 `password` 换成第 4 步的密码（密码含 `@ : / #` 等字符需 URL 编码）。
-2. `LLM_API_KEY=` 填入 DeepSeek API Key（https://platform.deepseek.com 申请）。**不填也能跑**，只是回复是本地演示文本。
-3. （可选）联网搜索：默认 `SEARCH_PROVIDER=duckduckgo` 零配置；国内建议改用 Bing 并填 `SEARCH_API_KEY`，见下文「联网搜索」。
+2. `LLM_API_KEY=` 填入 DeepSeek API Key（https://platform.deepseek.com 申请）。**不填也能跑**，聊天与任务都会退回本地演示文本。
+3. （可选）联网搜索：默认 `SEARCH_PROVIDER=auto` 零配置，见下文「联网搜索」。
+4. （可选）API Key、模型、视觉模型也可以启动后在「设置」界面里改，优先级高于 `.env`（存于 `data/settings.json`）。
 
 `.env` 已被 `.gitignore` 忽略，**不要提交**。
 
@@ -94,7 +109,7 @@ python ..\scripts\init_db.py
 python run.py
 ```
 
-- `alembic upgrade head` 创建 `users` / `conversations` / `messages` 三张表。
+- `alembic upgrade head` 创建 `users` / `conversations` / `messages` / `tasks` / `task_steps` 五张表（消息版本链、任务表由后续迁移自动补齐）。
 - `init_db.py` 补一个开发用户（id=1）并做幂等建表兜底。
 - `run.py` 一键启动后端并同时托管已构建的 `frontend/dist`，自动打开浏览器。
 
@@ -123,46 +138,73 @@ npm run dev
 
 1. 确认 MySQL 服务已启动。
 2. 后端启动后访问 `/api/health/database`，应返回 `{"status":"ok","database":"connected"}`。
-3. 前端"新建会话"发送一句话，应看到流式打字效果；刷新后会话与消息仍在（已写 MySQL）。
+3. 前端打开即是主界面（不自动选中会话）；输入一句话发送后，侧边栏才会出现该会话；刷新后会话与消息仍在（已写 MySQL）。
 4. 填了 `LLM_API_KEY` 后重启后端，回复来自真实模型。
 5. 工具调用：发送「帮我查一下今天的热点新闻」应触发联网搜索；发送「写一份周报并导出成 PDF」应触发文件生成并出现下载卡片。
+6. 重新生成：对最后一轮回复点「重新生成」，旧回答保留，气泡上出现 `‹ 2/2 ›` 可翻页回看。
+7. 任务模式：打开输入框左侧「任务模式」，发送一个多步目标（如「调研三款 AI 搜索产品，对比功能并写成 Word 报告」），先出现可编辑的步骤计划，点「执行计划」后逐步点亮状态，完成后可在会话中看到最终总结与产物文件。
 
-## 联网搜索（重要）
+## 联网搜索
 
-默认 `SEARCH_PROVIDER=duckduckgo` 零配置，但**国内网络常不可达**。生产使用建议切到 Bing（国内可直连）：
+默认 `SEARCH_PROVIDER=auto`：走 DuckDuckGo，失败时自动回退 Bing 网页抓取，零配置、国内多数网络可用。也可显式指定：
 
 ```env
-SEARCH_PROVIDER=bing
-SEARCH_API_KEY=你的Bing搜索API Key   # Azure 门户免费申请
+SEARCH_PROVIDER=duckduckgo   # 仅 DuckDuckGo
+SEARCH_PROVIDER=bing_scrape  # 仅 Bing 网页抓取
+SEARCH_PROVIDER=bing         # Bing 官方 API（需 SEARCH_API_KEY，Azure 申请）
+SEARCH_PROVIDER=tavily       # Tavily（面向 LLM 的搜索 API，需 SEARCH_API_KEY）
 ```
 
-也可用 `SEARCH_PROVIDER=tavily`（面向 LLM 的搜索 API，国内可能需要代理）。切换只改 `.env`，无需改代码。
+切换只改 `.env`，无需改代码。
 
 ## 目录结构（关键部分）
 
 ```text
 backend/
-  apps/api/                  FastAPI 入口与路由（含文件上传/下载）
+  apps/api/                  FastAPI 入口与路由（chat / tasks / files / settings / auth / health）
   src/agent_platform/        核心库
-    core/                    Agent 工具调用循环、上下文、事件
+    core/                    agent.py 工具循环 · planner.py 任务规划 · runner.py 任务执行 · events.py 事件词汇表 · context.py 上下文
     models/                  大模型适配层（供应商登记表）
-    tools/                   工具注册表 + 内置工具（web_search / generate_file）
-    services/                业务用例层
-    repositories/            数据访问层
-    infrastructure/          database / storage / search / generation
-  migrations/                Alembic 迁移
+    tools/                   工具注册表 + 内置工具（web_search / fetch_url / generate_file）
+    services/                业务用例层（chat_service · task_service · settings_service）
+    repositories/            数据访问层（conversations · messages(版本链) · tasks）
+    infrastructure/          database / storage / search / generation / attachments
+  migrations/                Alembic 迁移（0001–0005）
   pyproject.toml             后端依赖（pip install -e ".[dev]"）
-frontend/                    React + TypeScript 前端
+frontend/
+  src/
+    components/              Markdown 富渲染 · TaskCard 任务卡 · ConfirmDialog 确认弹窗 · SettingsModal
+    services/                api / chat(SSE) / tasks / settings
+    styles/                  设计令牌（浅色/深色）
+    types/                   类型定义
 scripts/                     check_db.py / init_db.py
 docs/                        architecture / database / api
-data/                        上传与生成的文件（gitignored）
+data/                        上传与生成的文件、settings.json（gitignored）
 .env.example                 环境变量模板
 ```
+
+## 版本规划
+
+| 版本 | 功能 | 主要目标 | 状态 |
+| --- | --- | --- | --- |
+| v0.1 | 基础聊天、流式输出 | 打通前后端与模型 | ✅ |
+| v0.2 | 工具调用 | 让模型能够使用外部工具 | ✅ |
+| v0.3 | 任务规划与执行 | 支持多步骤任务 | ✅ |
+| v0.4 | 记忆系统 | 保存和检索长期记忆 | 下一步 |
+| v0.5 | 知识库 | 支持文档上传、切块和检索 | |
+| v0.6 | 多模型管理 | 支持不同模型切换 | |
+| v0.7 | 账号体系 | 注册、登录、权限管理 | |
+| v0.8 | 云端部署 | 多用户在线服务 | |
+| v0.9 | 桌面启动器 | Windows 双击启动与云端连接 | |
+| v1.0 | 完整 Agent 平台 | 安全、稳定、可扩展 | |
+
+版本只是开发里程碑，不意味着每个版本必须严格按编号发布。
 
 ## 重要架构约束
 
 - React 不直接连接 MySQL；只通过 HTTP/SSE 调用 FastAPI。
 - FastAPI 路由负责输入输出；业务逻辑放 Service。
 - Repository 封装数据库读写；Session 按请求创建和关闭。
-- Agent Core 不依赖 FastAPI Request/Response，保持可独立演进。
+- Agent Core 不依赖 FastAPI Request/Response，保持可独立演进；Planner / Runner 同样只依赖模型协议。
+- 任务完成后才写回会话消息；删除会话会级联删除其任务与步骤。
 - 云端版本必须替换开发身份依赖，增加认证、权限、限流、HTTPS 和密钥管理。
