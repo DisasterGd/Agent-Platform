@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { chatApi, type StreamHandlers } from "./services/chat";
+import { tasksApi } from "./services/tasks";
 import Markdown from "./components/Markdown";
 import SettingsModal from "./components/SettingsModal";
-import type { Artifact, Attachment, Conversation, Message } from "./types/chat";
+import ConfirmDialog, { type ConfirmState } from "./components/ConfirmDialog";
+import TaskCard from "./components/TaskCard";
+import type { Artifact, Attachment, Conversation, Message, StreamEvent, Task } from "./types/chat";
 
 const TOOL_LABELS: Record<string, string> = {
   web_search: "联网搜索",
@@ -70,6 +73,20 @@ export default function App() {
     catch { return "light"; }
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // v0.3 任务模式
+  const [taskMode, setTaskMode] = useState(false);
+  const [liveTask, setLiveTask] = useState<Task | null>(null);
+  const [liveText, setLiveText] = useState("");
+  // 会话侧边栏：更多菜单 / 多选
+  const [menuFor, setMenuFor] = useState<number | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  // 应用内确认弹窗
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const confirmResolve = useRef<((v: boolean) => void) | null>(null);
+  const activeIdRef = useRef<number | null>(null);
+  activeIdRef.current = activeId;
+  const visibleIdsRef = useRef<number[]>([]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -82,27 +99,52 @@ export default function App() {
     return items;
   }, []);
 
+  /** 应用内确认弹窗（替代 window.confirm）。 */
+  const askConfirm = useCallback(
+    (title: string, message: string, danger = true, labels?: { confirm?: string; cancel?: string }) => (
+      new Promise<boolean>(resolve => {
+        confirmResolve.current = resolve;
+        setConfirmState({ title, message, danger, confirmLabel: labels?.confirm, cancelLabel: labels?.cancel });
+      })
+    ), []);
+
+  const closeConfirm = useCallback((v: boolean) => {
+    confirmResolve.current?.(v);
+    confirmResolve.current = null;
+    setConfirmState(null);
+  }, []);
+
   const load = useCallback(async (id: number) => {
     setActiveId(id);
     setVersionSel({});
-    setMessages(await chatApi.listMessages(id));
+    setLiveTask(null);
+    setLiveText("");
+    const [msgs, ts] = await Promise.all([
+      chatApi.listMessages(id),
+      tasksApi.listByConversation(id).catch(() => [] as Task[]),
+    ]);
+    setMessages(msgs);
+    // 恢复该会话未收尾的任务卡片（待审阅 / 失败可重试）
+    const open = ts.find(t => t.status === "awaiting_approval") ?? ts.find(t => t.status === "failed") ?? null;
+    setLiveTask(open);
   }, []);
 
+  // 初始界面 = 主界面：只拉列表，不选中任何会话
   useEffect(() => {
-    void refresh().then(items => {
-      if (items.length) return load(items[0].id);
-    }).catch((e: unknown) => setError(e instanceof Error ? e.message : "连接后端失败"));
-  }, [refresh, load]);
+    void refresh().catch((e: unknown) => setError(e instanceof Error ? e.message : "连接后端失败"));
+  }, [refresh]);
 
-  async function createChat() {
-    try {
-      setError("");
-      const item = await chatApi.createConversation();
-      await refresh();
-      await load(item.id);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "创建会话失败");
-    }
+  /** “新建会话”不立即落库：切回主界面，首次发送时才真正创建会话。 */
+  function openHome() {
+    setActiveId(null);
+    setMessages([]);
+    setLiveTask(null);
+    setLiveText("");
+    setVersionSel({});
+    setError("");
+    setMenuFor(null);
+    setSelectMode(false);
+    setSelectedIds(new Set());
   }
 
   function startEdit(c: Conversation) {
@@ -139,18 +181,67 @@ export default function App() {
   }
 
   async function removeConv(c: Conversation) {
-    if (!window.confirm(`删除会话「${c.title}」？此操作不可恢复。`)) return;
+    const ok = await askConfirm("删除会话", `删除会话「${c.title}」？此操作不可恢复。`);
+    if (!ok) return;
     try {
       setError("");
       await chatApi.deleteConversation(c.id);
-      const items = await refresh();
-      if (activeId === c.id) {
-        if (items.length) await load(items[0].id);
-        else { setActiveId(null); setMessages([]); }
-      }
+      setSelectedIds(cur => {
+        const n = new Set(cur);
+        n.delete(c.id);
+        return n;
+      });
+      if (activeId === c.id) openHome();
+      else await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "删除会话失败");
     }
+  }
+
+  function toggleSelect(id: number) {
+    setSelectedIds(cur => {
+      const n = new Set(cur);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+
+  function toggleSelectMode() {
+    setSelectMode(v => !v);
+    setSelectedIds(new Set());
+    setMenuFor(null);
+  }
+
+  function toggleAllSelected() {
+    setSelectedIds(cur => (cur.size ? new Set() : new Set(visibleIdsRef.current)));
+  }
+
+  async function bulkDelete() {
+    const ids = [...selectedIds];
+    if (!ids.length) return;
+    const ok = await askConfirm("删除会话", `确认删除选中的 ${ids.length} 个会话？此操作不可恢复。`);
+    if (!ok) return;
+    setError("");
+    let failed = 0;
+    for (const id of ids) {
+      try { await chatApi.deleteConversation(id); } catch { failed += 1; }
+    }
+    if (failed) setError(`${failed} 个会话删除失败`);
+    const wasActive = activeId !== null && selectedIds.has(activeId);
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    if (wasActive) openHome();
+    else await refresh();
+  }
+
+  async function bulkPin(pinned: boolean) {
+    for (const id of selectedIds) {
+      try { await chatApi.updateConversation(id, { pinned }); } catch { /* 单个失败不阻断批量 */ }
+    }
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    await refresh();
   }
 
   async function attachFiles(files: FileList | null) {
@@ -193,6 +284,22 @@ export default function App() {
     const content = input.trim();
     if (!content || busy) return;
     setError("");
+    if (taskMode) {
+      // 任务模式：只创建任务（规划出计划），审阅后在卡片上点“执行计划”
+      setBusy(true);
+      try {
+        const task = await tasksApi.create(content, activeId);
+        setLiveTask(task);
+        setLiveText("");
+        setInput("");
+        setAttachments([]);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "任务创建失败");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     setBusy(true);
     setToolLog([]);
     let id = activeId;
@@ -277,6 +384,97 @@ export default function App() {
     }
   }
 
+  /** v0.3：任务执行事件 → 卡片状态。 */
+  function handleTaskEvent(ev: StreamEvent) {
+    switch (ev.type) {
+      case "plan_created":
+        setLiveText("");
+        setLiveTask(t => (t ? { ...t, status: "running", steps: ev.steps ?? t.steps } : t));
+        break;
+      case "step_started":
+        setLiveText("");
+        setLiveTask(t => (t ? { ...t, status: "running", steps: t.steps.map(s => (s.idx === ev.index ? { ...s, status: "running" as const } : s)) } : t));
+        break;
+      case "text_delta":
+        setLiveText(prev => prev + (ev.content ?? ""));
+        break;
+      case "artifact_ready":
+        setLiveTask(t => (t ? { ...t, steps: t.steps.map(s => (s.status === "running"
+          ? { ...s, artifacts: [...(s.artifacts ?? []), { filename: ev.filename ?? "", url: ev.url ?? "", format: ev.format ?? "" }] }
+          : s)) } : t));
+        break;
+      case "step_completed":
+        setLiveText("");
+        setLiveTask(t => (t ? { ...t, steps: t.steps.map(s => (s.idx === ev.index
+          ? { ...s, status: "done" as const, summary: ev.summary ?? "", artifacts: ev.artifacts ?? s.artifacts }
+          : s)) } : t));
+        break;
+      case "step_failed":
+        setLiveTask(t => (t ? { ...t, status: "failed", steps: t.steps.map(s => (s.idx === ev.index ? { ...s, status: "failed" as const, error: ev.error ?? "" } : s)) } : t));
+        break;
+      case "task_completed": {
+        const st = ev.status ?? "completed";
+        if (st === "cancelled") {
+          setLiveTask(null);
+          setLiveText("");
+        } else {
+          setLiveTask(t => (t ? { ...t, status: st } : t));
+        }
+        break;
+      }
+    }
+  }
+
+  async function executeTask(taskId: number) {
+    if (busy) return;
+    setBusy(true);
+    setToolLog([]);
+    setError("");
+    try {
+      // streamHandlers(-1)：占位消息 id 不存在 → onDelta 无副作用，只借工具读数与事件旁路
+      await tasksApi.execute(taskId, { ...streamHandlers(-1), onEvent: handleTaskEvent });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "任务执行失败");
+    } finally {
+      setBusy(false);
+    }
+    try {
+      const latest = await tasksApi.get(taskId);
+      if (latest.status === "completed") {
+        setLiveTask(null);
+        setLiveText("");
+        const cid = latest.conversation_id;
+        if (cid !== null && (activeIdRef.current === null || activeIdRef.current === cid)) await load(cid);
+        await refresh();
+      } else {
+        setLiveTask(latest);
+      }
+    } catch { /* 同步失败保留现场 */ }
+  }
+
+  async function reviseLiveTask(steps: { title: string; detail: string }[]) {
+    if (!liveTask) return;
+    setLiveTask(await tasksApi.revise(liveTask.id, steps));
+  }
+
+  async function cancelLiveTask() {
+    if (!liveTask) return;
+    const ok = await askConfirm("取消任务", "取消后该任务不再执行；已产生的步骤结果仍会保留。", false,
+      { confirm: "取消任务", cancel: "继续" });
+    if (!ok) return;
+    try {
+      const t = await tasksApi.cancel(liveTask.id);
+      if (t.status === "cancelled") {
+        setLiveTask(null);
+        setLiveText("");
+      } else {
+        setLiveTask(t);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "取消任务失败");
+    }
+  }
+
   function startEditMessage(turn: Turn, row: Message) {
     setEditingMsgId(turn.key);
     setEditDraft(row.content);
@@ -309,14 +507,30 @@ export default function App() {
     const kw = search.trim().toLowerCase();
     return !kw || c.title.toLowerCase().includes(kw);
   });
+  visibleIdsRef.current = visible.map(c => c.id);
 
   return <div className="shell">
     <aside className="sidebar">
       <div className="brand"><b className="mark">◉</b><div className="brand-word"><strong>Agent</strong><span>工作台</span></div></div>
-      <button className="new" onClick={() => void createChat()}>新建会话</button>
-      <div className="section-label">会话</div>
+      <button className="new" onClick={openHome}>新建会话</button>
+      <div className="section-label conv-head">
+        <span>会话</span>
+        <button type="button" className={`conv-select-toggle ${selectMode ? "on" : ""}`} onClick={toggleSelectMode}>
+          {selectMode ? "退出多选" : "多选"}
+        </button>
+      </div>
       <input className="conv-search" placeholder="搜索会话…" value={search}
         onChange={e => setSearch(e.target.value)} />
+      {selectMode && (
+        <div className="conv-bulk-bar">
+          <button type="button"
+            onClick={toggleAllSelected}>{selectedIds.size > 0 && selectedIds.size === visibleIdsRef.current.length ? "取消全选" : "全选"}</button>
+          <em>已选 {selectedIds.size}</em>
+          <button type="button" disabled={!selectedIds.size} onClick={() => void bulkPin(true)}>置顶</button>
+          <button type="button" disabled={!selectedIds.size} onClick={() => void bulkPin(false)}>取消置顶</button>
+          <button type="button" className="danger" disabled={!selectedIds.size} onClick={() => void bulkDelete()}>删除</button>
+        </div>
+      )}
       <nav className="conv-list">{visible.map(c =>
         editingId === c.id ? (
           <input key={c.id} className="rename-input" autoFocus value={draftTitle}
@@ -327,14 +541,31 @@ export default function App() {
               if (e.key === "Escape") { cancelRename.current = true; setEditingId(null); }
             }} />
         ) : (
-          <div key={c.id} className={`conv-item ${activeId === c.id ? "selected" : ""}`}>
+          <div key={c.id} className={`conv-item ${activeId === c.id ? "selected" : ""} ${selectMode && selectedIds.has(c.id) ? "checked" : ""}`}>
+            {selectMode && (
+              <input type="checkbox" className="conv-check" checked={selectedIds.has(c.id)}
+                onChange={() => toggleSelect(c.id)} aria-label={`选择会话 ${c.title}`} />
+            )}
             <button className="conv-title" title={c.title}
-              onClick={() => void load(c.id)}
-              onDoubleClick={() => startEdit(c)}>{c.title}</button>
-            <button className="conv-edit" title="重命名" onClick={() => startEdit(c)}>✎</button>
-            <button className={`conv-pin ${c.pinned ? "on" : ""}`} title={c.pinned ? "取消置顶" : "置顶"}
-              onClick={() => void pin(c)}>📌</button>
-            <button className="conv-del" title="删除" onClick={() => void removeConv(c)}>✕</button>
+              onClick={() => (selectMode ? toggleSelect(c.id) : void load(c.id))}
+              onDoubleClick={() => startEdit(c)}>
+              {c.pinned && <span className="conv-pin-flag" title="已置顶">📌</span>}
+              {c.title}
+            </button>
+            {!selectMode && (
+              <button className="conv-more" type="button" title="更多操作" aria-label="更多操作"
+                onClick={() => setMenuFor(menuFor === c.id ? null : c.id)}>⋯</button>
+            )}
+            {menuFor === c.id && (
+              <>
+                <div className="menu-scrim" onClick={() => setMenuFor(null)} />
+                <div className="conv-menu">
+                  <button type="button" onClick={() => { setMenuFor(null); startEdit(c); }}>重命名</button>
+                  <button type="button" onClick={() => { setMenuFor(null); void pin(c); }}>{c.pinned ? "取消置顶" : "置顶"}</button>
+                  <button type="button" className="danger" onClick={() => { setMenuFor(null); void removeConv(c); }}>删除</button>
+                </div>
+              </>
+            )}
           </div>
         )
       )}</nav>
@@ -343,10 +574,10 @@ export default function App() {
 
     <main className="main">
       <header className="topbar">
-        <div className="topbar-title">{activeConv?.title ?? "新会话"}</div>
+        <div className="topbar-title">{activeConv?.title ?? "主界面"}</div>
         <div className="topbar-meta">
           <span className="meta-item">模型 <b>DeepSeek</b></span>
-          <span className="meta-item">v0.2.6</span>
+          <span className="meta-item">v0.3.0</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
@@ -370,14 +601,15 @@ export default function App() {
       )}
 
       <section className="chat-area">
-        {turns.length === 0
+        {turns.length === 0 && !liveTask
           ? <div className="welcome">
               <div className="welcome-mark">◉</div>
               <h2>从一个想法开始</h2>
-              <p>输入一句话，Agent 会<b>联网搜索</b>最新信息，或<b>生成文档</b>（Word / PDF / Markdown）。</p>
+              <p>输入一句话，Agent 会<b>联网搜索</b>最新信息、<b>生成文档</b>（Word / PDF / Markdown），
+              或打开<b>任务模式</b>把目标拆解为多步计划执行。</p>
               <div className="panel">
                 <div className="panel-cell"><span>模型</span><b>DeepSeek</b></div>
-                <div className="panel-cell"><span>工具</span><b>搜索 · 文档</b></div>
+                <div className="panel-cell"><span>工具</span><b>搜索 · 文档 · 任务</b></div>
                 <div className="panel-cell"><span>状态</span><b>就绪</b></div>
               </div>
             </div>
@@ -467,7 +699,14 @@ export default function App() {
                 </div>
               </article>
               );
-            })}</div>}
+            })}
+            {liveTask && (
+              <TaskCard task={liveTask} liveText={liveText} busy={busy}
+                onExecute={() => void executeTask(liveTask.id)}
+                onCancel={() => void cancelLiveTask()}
+                onRevise={reviseLiveTask} />
+            )}
+            </div>}
       </section>
 
       <div className="composer-wrap">
@@ -509,9 +748,14 @@ export default function App() {
                 onChange={e => void attachFiles(e.target.files)} />
               <button className="attach-btn" type="button" title="上传文件或图片"
                 onClick={() => fileInputRef.current?.click()}>＋</button>
-              <span className="hint">支持联网搜索与文档生成</span>
+              <button type="button" className={`mode-pill ${taskMode ? "on" : ""}`}
+                title="任务模式：把目标拆解为多步计划，审阅后执行"
+                onClick={() => setTaskMode(v => !v)}>任务模式</button>
+              <span className="hint">{taskMode ? "描述一个目标，Agent 先给出执行计划" : "支持联网搜索与文档生成"}</span>
             </div>
-            <button className="send-btn" disabled={busy || !input.trim()} onClick={() => void send()}>{busy ? "生成中…" : "发送　↑"}</button>
+            <button className="send-btn" disabled={busy || !input.trim()} onClick={() => void send()}>
+              {busy ? (liveTask?.status === "running" ? "执行中…" : taskMode ? "规划中…" : "生成中…") : taskMode ? "规划任务" : "发送　↑"}
+            </button>
           </div>
         </div>
         <p className="disclaimer">Agent 可能生成不准确的信息。重要内容请自行核实。</p>
@@ -521,5 +765,6 @@ export default function App() {
     {settingsOpen && (
       <SettingsModal theme={theme} onThemeChange={setTheme} onClose={() => setSettingsOpen(false)} />
     )}
+    {confirmState && <ConfirmDialog state={confirmState} onClose={closeConfirm} />}
   </div>;
 }

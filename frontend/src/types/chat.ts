@@ -41,4 +41,39 @@ export interface StreamEvent {
   url?: string;
   format?: string;
   content_type?: string;
+  /** v0.3 任务事件字段 */
+  steps?: TaskStep[];
+  index?: number;
+  title?: string;
+  summary?: string;
+  error?: string;
+  artifacts?: Artifact[];
+  status?: Task["status"];
+  conversation_id?: number;
+}
+
+export type TaskStatus = "awaiting_approval" | "running" | "completed" | "failed" | "cancelled";
+export type TaskStepStatus = "pending" | "running" | "done" | "failed";
+
+export interface TaskStep {
+  idx: number;
+  title: string;
+  detail: string;
+  status: TaskStepStatus;
+  summary: string;
+  error: string;
+  artifacts?: Artifact[];
+}
+
+export interface Task {
+  id: number;
+  user_id: number;
+  conversation_id: number | null;
+  goal: string;
+  status: TaskStatus;
+  summary: string;
+  error: string;
+  created_at: string;
+  updated_at: string;
+  steps: TaskStep[];
 }

@@ -73,16 +73,31 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
 .conv-item.selected::before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:3px;border-radius:0 2px 2px 0;background:var(--signal)}
 .conv-title{flex:1;min-width:0;padding:10px 12px;border:0;background:transparent;color:var(--ink-soft);text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;line-height:1.4}
 .conv-item:hover .conv-title,.conv-item.selected .conv-title{color:var(--ink)}
-.conv-edit{flex:none;width:26px;height:26px;margin-right:6px;border:0;border-radius:3px;color:var(--ink-faint);background:transparent;font-size:12px;opacity:0;transition:opacity .15s}
-.conv-item:hover .conv-edit,.conv-item.selected .conv-edit{opacity:1}
-.conv-edit:hover{background:rgba(28,30,36,.08);color:var(--ink)}
-.conv-pin,.conv-del{flex:none;width:24px;height:24px;margin-right:2px;border:0;border-radius:3px;color:var(--ink-faint);background:transparent;font-size:12px;line-height:1;opacity:0;transition:opacity .15s;padding:0}
-.conv-item:hover .conv-pin,.conv-item.selected .conv-pin,
-.conv-item:hover .conv-del,.conv-item.selected .conv-del{opacity:1}
-.conv-pin:hover{background:rgba(28,30,36,.08);color:var(--ink)}
-.conv-pin.on{opacity:1;color:var(--signal)}
-.conv-del{margin-right:6px}
-.conv-del:hover{background:rgba(198,60,44,.1);color:var(--signal)}
+.conv-more{flex:none;width:26px;height:26px;margin-right:6px;border:0;border-radius:3px;color:var(--ink-faint);background:transparent;font-size:14px;line-height:1;opacity:0;transition:opacity .15s,background .15s;padding:0}
+.conv-item:hover .conv-more,.conv-item.selected .conv-more,.conv-more:focus-visible{opacity:1}
+.conv-more:hover{background:rgba(28,30,36,.08);color:var(--ink)}
+.conv-pin-flag{margin-right:4px;font-size:11px}
+
+/* 会话“更多”弹出菜单 */
+.menu-scrim{position:fixed;inset:0;z-index:40}
+.conv-menu{position:absolute;right:8px;top:32px;z-index:41;min-width:108px;display:flex;flex-direction:column;padding:4px;background:var(--paper-raised);border:1px solid var(--line);border-radius:4px;box-shadow:0 8px 24px rgba(0,0,0,.14)}
+.conv-menu button{text-align:left;border:0;background:transparent;color:var(--ink-soft);font-size:12px;padding:7px 10px;border-radius:3px}
+.conv-menu button:hover{background:var(--paper-deep);color:var(--ink)}
+.conv-menu button.danger:hover{background:rgba(198,60,44,.1);color:var(--signal)}
+
+/* 多选模式 */
+.conv-head{display:flex;align-items:center;justify-content:space-between;margin-right:4px}
+.conv-select-toggle{border:1px solid var(--line);border-radius:3px;background:transparent;color:var(--ink-faint);font-size:10px;padding:2px 8px;letter-spacing:.04em}
+.conv-select-toggle:hover,.conv-select-toggle.on{color:var(--ink);border-color:var(--line-strong)}
+.conv-check{flex:none;width:15px;height:15px;margin-left:8px;accent-color:var(--signal)}
+.conv-item.checked{background:rgba(198,60,44,.06)}
+.conv-bulk-bar{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:0 2px 8px;padding:8px;border:1px solid var(--line);border-radius:4px;background:var(--paper-raised);font-size:11px;flex:none}
+.conv-bulk-bar em{font-style:normal;color:var(--ink-faint);flex:1;text-align:center}
+.conv-bulk-bar button{border:1px solid var(--line);border-radius:3px;background:transparent;color:var(--ink-soft);font-size:11px;padding:3px 7px}
+.conv-bulk-bar button:hover:not(:disabled){color:var(--ink);border-color:var(--line-strong)}
+.conv-bulk-bar button.danger{border-color:rgba(198,60,44,.4);color:var(--signal)}
+.conv-bulk-bar button.danger:hover{background:rgba(198,60,44,.1)}
+.conv-bulk-bar button:disabled{opacity:.4;cursor:not-allowed}
 .rename-input{width:100%;padding:9px 12px;border:1px solid var(--signal);border-radius:3px;color:var(--ink);background:var(--paper-raised);font-size:13px;outline:0}
 .side-foot{display:flex;align-items:center;gap:8px;margin-top:auto;padding:16px 6px 0;border-top:1px solid var(--line);color:var(--ink-faint);font-family:var(--mono);font-size:11px;flex:none}
 .led{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
@@ -231,6 +246,9 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
 .composer-tools .hint{color:var(--ink-faint);font-family:var(--mono);font-size:11px}
 .attach-btn{width:32px;height:32px;display:grid;place-items:center;border:0;border-radius:50%;background:transparent;color:var(--ink-faint);font-size:18px;line-height:1;padding:0;transition:color .15s,background .15s}
 .attach-btn:hover{color:var(--ink);background:var(--paper-deep)}
+.mode-pill{border:1px solid var(--line);border-radius:3px;background:transparent;color:var(--ink-faint);font-size:11px;padding:5px 10px;font-family:var(--mono);transition:color .15s,border-color .15s,background .15s}
+.mode-pill:hover{color:var(--ink);border-color:var(--line-strong)}
+.mode-pill.on{color:var(--signal);border-color:var(--signal);background:rgba(198,60,44,.06)}
 .send-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:0;border-radius:3px;color:#fff;background:var(--signal);font-size:13px;font-weight:500;transition:background .15s}
 .send-btn:hover{background:var(--signal-deep)}
 .send-btn:disabled{opacity:.4;cursor:not-allowed}
@@ -276,6 +294,63 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
 .save-btn:hover{background:var(--signal-deep)}
 .save-btn:disabled{opacity:.5;cursor:not-allowed}
 
+/* 应用内确认弹窗（替代 window.confirm） */
+.confirm-modal{width:min(380px,100%)}
+.confirm-message{margin:0 0 18px;color:var(--ink-soft);font-size:13px;line-height:1.7}
+.confirm-actions{display:flex;gap:10px;justify-content:flex-end}
+.confirm-actions button{border:1px solid var(--line);border-radius:4px;background:transparent;color:var(--ink-soft);font-size:13px;padding:8px 16px}
+.confirm-actions button:hover{color:var(--ink);border-color:var(--line-strong)}
+.confirm-actions button.primary{border-color:var(--signal);color:#fff;background:var(--signal)}
+.confirm-actions button.primary:hover{background:var(--signal-deep)}
+.confirm-actions button.danger{border-color:var(--signal);color:#fff;background:var(--signal)}
+.confirm-actions button.danger:hover{background:var(--signal-deep)}
+
+/* ===== v0.3 任务规划与执行 ===== */
+.task-card{margin-top:4px;border:1px solid var(--line);border-radius:6px;background:var(--paper-raised);padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.task-card.failed{border-color:rgba(198,60,44,.45)}
+.task-head{display:flex;align-items:center;justify-content:space-between}
+.task-kicker{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--ink-faint)}
+.task-status{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:2px}
+.task-status.s-awaiting_approval{color:var(--ink-soft);background:var(--paper-deep)}
+.task-status.s-running{color:#fff;background:var(--signal);animation:pulse 1.6s infinite}
+.task-status.s-completed{color:var(--ok);background:rgba(79,122,91,.12)}
+.task-status.s-failed{color:#fff;background:var(--signal-deep)}
+.task-status.s-cancelled{color:var(--ink-faint);background:var(--paper-deep)}
+.task-goal{margin:0;font-size:14px;font-weight:600;color:var(--ink);line-height:1.6}
+.task-steps{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column}
+.task-step{display:flex;gap:10px;padding:8px 0;border-top:1px dashed var(--line)}
+.task-step:first-child{border-top:0}
+.task-step-dot{flex:none;width:8px;height:8px;margin-top:6px;border-radius:50%;background:transparent;border:1.5px solid var(--line-strong)}
+.task-step.running .task-step-dot{border-color:var(--signal);background:var(--signal);animation:pulse 1.2s infinite}
+.task-step.done .task-step-dot{border-color:var(--ok);background:var(--ok)}
+.task-step.failed .task-step-dot{border-color:var(--signal-deep);background:var(--signal-deep)}
+.task-step-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.task-step-line{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.task-step-line b{font-size:13px;font-weight:600;color:var(--ink)}
+.task-step-line em{font-style:normal;font-family:var(--mono);font-size:10px;color:var(--ink-faint);flex:none}
+.task-step-detail{font-size:12px;color:var(--ink-faint);line-height:1.6}
+.task-step-summary{font-size:12px;color:var(--ink-soft);background:var(--paper-deep);border-radius:3px;padding:7px 10px;line-height:1.6;max-height:80px;overflow:hidden}
+.task-step-error{font-size:12px;color:var(--signal-deep);background:rgba(198,60,44,.08);border-radius:3px;padding:7px 10px}
+.task-step-live{border:1px solid var(--line);border-radius:3px;background:var(--paper);padding:8px 10px;max-height:220px;overflow-y:auto;font-size:13px}
+.task-step-edit{display:flex;flex-direction:column;gap:6px;position:relative}
+.task-step-title{width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:3px;background:var(--paper);color:var(--ink);font-size:13px;font-weight:600;outline:0}
+.task-step-title:focus{border-color:var(--ink)}
+.task-step-edit textarea{width:100%;resize:vertical;padding:7px 10px;border:1px solid var(--line);border-radius:3px;background:var(--paper);color:var(--ink-soft);font-size:12px;line-height:1.6;outline:0;font-family:inherit}
+.task-step-edit textarea:focus{border-color:var(--ink)}
+.task-step-remove{position:absolute;right:6px;top:6px;width:22px;height:22px;border:0;border-radius:3px;background:transparent;color:var(--ink-faint);font-size:14px;line-height:1;padding:0}
+.task-step-remove:hover:not(:disabled){background:rgba(198,60,44,.1);color:var(--signal)}
+.task-step-remove:disabled{opacity:.35;cursor:not-allowed}
+.task-add-step{align-self:flex-start;border:1px dashed var(--line-strong);border-radius:3px;background:transparent;color:var(--ink-faint);font-size:11px;padding:6px 12px;font-family:var(--mono)}
+.task-add-step:hover{color:var(--ink);border-color:var(--ink-faint)}
+.task-note{font-size:11px;color:var(--ink-faint);background:var(--paper-deep);padding:7px 10px;border-radius:3px;line-height:1.6}
+.task-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:2px}
+.task-actions:empty{display:none}
+.task-run-btn{border:0;border-radius:3px;background:var(--signal);color:#fff;font-size:12px;padding:7px 14px}
+.task-run-btn:hover{background:var(--signal-deep)}
+.task-run-btn:disabled{opacity:.5;cursor:not-allowed}
+.task-cancel-btn{border:1px solid var(--line);border-radius:3px;background:transparent;color:var(--ink-faint);font-size:12px;padding:6px 12px}
+.task-cancel-btn:hover{color:var(--ink);border-color:var(--line-strong)}
+
 /* 问题索引仅在宽屏显示，避免与阅读列重叠 */
 @media(max-width:1200px){
   .index{display:none}
@@ -292,7 +367,8 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
   .conv-item{justify-content:center}
   .conv-item.selected::before{display:none}
   .conv-title{font-size:0;padding:0;height:34px}
-  .conv-edit,.conv-pin,.conv-del,.conv-search{display:none}
+  .conv-search,.conv-check,.conv-select-toggle,.conv-bulk-bar{display:none}
+  .conv-more{opacity:1}
   .side-foot{font-size:0;justify-content:center}
   .topbar{padding:0 16px}
   .topbar-meta .meta-item:nth-child(2){display:none}

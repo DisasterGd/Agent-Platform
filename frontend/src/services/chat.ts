@@ -6,10 +6,12 @@ export interface StreamHandlers {
   onToolStart?: (name: string) => void;
   onToolEnd?: (name: string) => void;
   onArtifact?: (artifact: Artifact) => void;
+  /** 通用事件旁路（v0.3 任务事件等），每种事件都会回调。 */
+  onEvent?: (event: StreamEvent) => void;
 }
 
 /** 发起 SSE 流式请求并逐事件回调。 */
-async function streamSSE(url: string, body: unknown, handlers: StreamHandlers) {
+export async function streamSSE(url: string, body: unknown, handlers: StreamHandlers) {
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -33,6 +35,7 @@ async function streamSSE(url: string, body: unknown, handlers: StreamHandlers) {
         for (const line of frame.split(/\r?\n/)) {
           if (!line.startsWith("data:")) continue;
           const event = JSON.parse(line.slice(5).trim()) as StreamEvent;
+          handlers.onEvent?.(event);
           switch (event.type) {
             case "text_delta":
               if (event.content) handlers.onDelta(event.content);
