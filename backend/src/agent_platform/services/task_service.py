@@ -2,10 +2,12 @@
 
 状态机：awaiting_approval →（用户确认）running → completed / failed / cancelled。
 计划由 Planner 生成，用户可先编辑再执行；执行由 Runner 驱动并逐步落库；
-任务完成后把「目标 + 最终总结」写入会话（无会话则懒创建），保证聊天上下文连续。
+执行开始即绑定/新建会话并写入目标消息，完成或失败都会把结果写进会话，
+保证中断、失败的任务也有记录（标题先用截取临时值，完成后模型精炼）。
 """
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -95,29 +97,44 @@ class TaskService:
             yield error("任务没有可执行的步骤")
             return
 
+        first_run = task.status == "awaiting_approval"
+        # 生成阶段即绑定/创建会话：失败、中断的任务也能在会话里留下记录
+        conversation = self._ensure_conversation(task)
         self.tasks.set_status(task_id, "running")
         self.tasks.reset_steps(task_id)
-        yield plan_created(steps)
+        if first_run:
+            self.messages.add(conversation.id, "user", task.goal)
+            self.chat.apply_provisional_title(conversation.id, task.goal)
+        self.conversations.touch(conversation.id)
+        yield plan_created(steps, conversation.id)
 
         runner = Runner(self.model, tools=self.tools)
-        async for event in runner.run(task.goal, steps):
-            # 取消检查：任何时刻把状态改为 cancelled 都会在下一个事件生效
-            if self._is_cancelled(task_id):
-                yield task_completed({"status": "cancelled", "summary": ""})
-                return
-            self._persist_step_event(task_id, event)
-            yield event
-            if event.type == "step_failed":
-                self.tasks.set_status(task_id, "failed", error=event.data.get("error", ""))
-                yield task_completed({"status": "failed", "summary": "", "error": event.data.get("error", "")})
-                return
+        try:
+            async for event in runner.run(task.goal, steps):
+                # 取消检查：任何时刻把状态改为 cancelled 都会在下一个事件生效
+                if self._is_cancelled(task_id):
+                    yield task_completed({"status": "cancelled", "summary": "", "conversation_id": conversation.id})
+                    return
+                self._persist_step_event(task_id, event)
+                yield event
+                if event.type == "step_failed":
+                    error_text = event.data.get("error", "")
+                    self.tasks.set_status(task_id, "failed", error=error_text)
+                    self._record_failure(conversation.id, task.goal, runner.outcomes, error_text)
+                    yield task_completed(
+                        {"status": "failed", "summary": "", "error": error_text, "conversation_id": conversation.id}
+                    )
+                    return
+        except (asyncio.CancelledError, GeneratorExit):
+            # 客户端断开：把任务标为失败并留下记录，避免“消失且不可重试”
+            self.tasks.set_status(task_id, "failed", error="执行被中断（客户端断开），可重新执行")
+            raise
 
         summary = await self._compose_summary(task.goal, runner.outcomes)
         self.tasks.set_status(task_id, "completed", summary=summary)
-        conversation_id = await self._finalize_conversation(task, summary)
-        yield task_completed(
-            {"status": "completed", "summary": summary, "conversation_id": conversation_id}
-        )
+        self._finalize_conversation(conversation, summary)
+        await self.chat.ensure_title(conversation.id, task.goal)
+        yield task_completed({"status": "completed", "summary": summary, "conversation_id": conversation.id})
 
     def _is_cancelled(self, task_id: int) -> bool:
         status = self.db.execute(select(Task.status).where(Task.id == task_id)).scalar_one_or_none()
@@ -162,16 +179,31 @@ class TaskService:
             parts.append(f"【{o.title}】\n{o.summary}\n")
         return "\n".join(parts).strip()
 
-    async def _finalize_conversation(self, task: Task, summary: str) -> int:
-        """把任务结果落到会话：无会话则懒创建；写入目标与最终总结；补标题。"""
+    def _ensure_conversation(self, task: Task) -> Conversation:
+        """执行开始时确保任务绑定一个有效会话；没有就立刻新建（生成阶段即建会话）。"""
         conversation: Conversation | None = (
             self.conversations.get(task.conversation_id) if task.conversation_id else None
         )
         if conversation is None or conversation.user_id != task.user_id:
             conversation = self.conversations.create(task.user_id, "新会话")
             self.tasks.set_conversation(task.id, conversation.id)
-        self.messages.add(conversation.id, "user", task.goal)
-        self.messages.add(conversation.id, "assistant", summary)
+        return conversation
+
+    def _finalize_conversation(self, conversation: Conversation, summary: str) -> None:
+        """任务完成：把最终总结写入已绑定的会话。"""
+        if summary:
+            self.messages.add(conversation.id, "assistant", summary)
         self.conversations.touch(conversation.id)
-        await self.chat.ensure_title(conversation.id, task.goal)
-        return conversation.id
+
+    def _record_failure(self, conversation_id: int, goal: str, outcomes: list, error: str) -> None:
+        """任务失败：把错误与已完成步骤的结果写入会话，保证“失败也留痕、可回溯”。"""
+        lines = [f"⚠️ 任务执行失败：{error or '未知原因'}", "", f"目标：{goal}"]
+        done = [o for o in outcomes if o.status == "done"]
+        if done:
+            lines.extend(["", "已完成的步骤："])
+            for o in done:
+                summary = o.summary if len(o.summary) <= 800 else o.summary[:800] + "…"
+                lines.append(f"【{o.title}】\n{summary}")
+        lines.extend(["", "可点击任务卡片上的“重新执行”重试；失败原因也会显示在卡片中。"])
+        self.messages.add(conversation_id, "assistant", "\n".join(lines))
+        self.conversations.touch(conversation_id)

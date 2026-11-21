@@ -35,6 +35,14 @@ TITLE_SYSTEM_PROMPT = (
 
 VISION_PROMPT = "请用简洁的中文描述这张图片的内容。"
 
+PROVISIONAL_TITLE_LIMIT = 20
+
+
+def provisional_title(content: str) -> str:
+    """生成阶段的临时标题：直接截取首条用户消息，让会话列表马上“有内容可依”。"""
+    text = " ".join(content.split())
+    return text[:PROVISIONAL_TITLE_LIMIT] + ("…" if len(text) > PROVISIONAL_TITLE_LIMIT else "")
+
 
 class ChatService:
     def __init__(self, db: Session) -> None:
@@ -132,10 +140,20 @@ class ChatService:
         ):
             yield event
 
-    async def ensure_title(self, conversation_id: int, content: str) -> None:
-        """首条用户消息且标题仍为默认值时，用模型生成简洁标题（无模型则退化截断）。"""
+    def apply_provisional_title(self, conversation_id: int, content: str) -> None:
+        """生成开始时同步写入截取式临时标题（仅当标题仍是默认值）。"""
         conversation = self.conversations.get(conversation_id)
         if conversation is None or conversation.title.strip() not in ("", "新会话"):
+            return
+        self.conversations.update_title(conversation_id, provisional_title(content))
+
+    async def ensure_title(self, conversation_id: int, content: str) -> None:
+        """标题仍为默认值或本轮的临时标题时，用模型生成简洁标题（无模型则退化截断）。"""
+        conversation = self.conversations.get(conversation_id)
+        if conversation is None:
+            return
+        current = conversation.title.strip()
+        if current not in ("", "新会话", provisional_title(content)):
             return
         title = ""
         if self.model is not None:
@@ -150,8 +168,7 @@ class ChatService:
                 title = ""
         title = " ".join(title.split()).strip().strip('"\'“”「」『』')
         if not title:
-            text = " ".join(content.split())
-            title = text[:20] + ("…" if len(text) > 20 else "")
+            title = provisional_title(content)
         self.conversations.update_title(conversation_id, title)
 
     async def _describe_image(self, category: str, stored_name: str, content_type: str) -> str | None:
@@ -203,6 +220,8 @@ class ChatService:
         # 落库保存原始内容 + 附件元数据，供前端展示与刷新后回显
         self.messages.add(conversation_id, "user", content, attachments=attachments)
         self.conversations.touch(conversation_id)
+        # 新会话立刻有可读标题（截取提问），生成完成后再由模型精炼
+        self.apply_provisional_title(conversation_id, content)
 
         # 上下文取每个版本链的最新一条；最后一条为刚插入的用户消息，用附件正文/识图结果增强
         history = self.messages.list_active_by_conversation(conversation_id)
@@ -220,25 +239,21 @@ class ChatService:
         user_content: str,
         assistant_group_id: int | None = None,
     ) -> AsyncIterator[Event]:
-        """调用模型产出一次回复，并作为新消息（或旧回复的新版本）落库。"""
-        parts: list[str] = []
-        try:
-            if self.model is not None:
-                agent = Agent(self.model, tools=self.tools)
-                async for event in agent.stream(chat_messages):
-                    if event.type == "text_delta":
-                        parts.append(event.data.get("content", ""))
-                    yield event
-            else:
-                async for token in self._demo_stream(user_content):
-                    parts.append(token)
-                    yield text_delta(token)
-        except Exception as exc:  # noqa: BLE001
-            yield error(f"模型调用失败：{exc}")
-            return
+        """调用模型产出一次回复，并作为新消息（或旧回复的新版本）落库。
 
-        reply = "".join(parts).strip()
-        if reply:
+        中断兜底：模型报错或客户端切走导致流终止时，已生成的部分（含中断说明）也会落库，
+        避免“生成到一半的内容凭空消失”。
+        """
+        parts: list[str] = []
+        persisted = False
+
+        def _persist(note: str = "") -> None:
+            nonlocal persisted
+            if persisted:
+                return
+            reply = ("".join(parts) + note).strip()
+            if not reply:
+                return
             if assistant_group_id is not None:
                 # 重新生成：不覆盖旧回复，追加为同一版本链的下一个版本
                 self.messages.add(
@@ -250,6 +265,29 @@ class ChatService:
                 )
             else:
                 self.messages.add(conversation_id, "assistant", reply)
+            persisted = True
+
+        try:
+            if self.model is not None:
+                agent = Agent(self.model, tools=self.tools)
+                async for event in agent.stream(chat_messages):
+                    if event.type == "text_delta":
+                        parts.append(event.data.get("content", ""))
+                    yield event
+            else:
+                async for token in self._demo_stream(user_content):
+                    parts.append(token)
+                    yield text_delta(token)
+        except (asyncio.CancelledError, GeneratorExit):
+            # 客户端断开/切换会话：同步落库部分产出后继续向上抛出（不能在 finally 里 await）
+            _persist("\n\n（回复生成被中断）")
+            raise
+        except Exception as exc:  # noqa: BLE001
+            _persist(f"\n\n⚠️ 生成中断：{exc}")
+            yield error(f"模型调用失败：{exc}")
+            return
+
+        _persist()
         await self.ensure_title(conversation_id, user_content)
         yield task_completed()
 
