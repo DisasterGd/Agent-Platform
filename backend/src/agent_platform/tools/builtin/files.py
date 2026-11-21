@@ -29,15 +29,17 @@ GENERATE_FILE_PARAMETERS = {
 def generate_file(format: str, title: str, content: str) -> ToolResult:
     filename, content_type, data = DocumentGenerator().generate(format, title, content)
     stored = get_storage().save("generated", filename, data, content_type)
+    # 显示名 = 磁盘真实名 = 下载链接名（重名时带 “ (2)” 序号），方便直接在 data/generated 里翻阅
     artifact = {
-        "filename": filename,
+        "filename": stored.stored_name,
+        "stored_name": stored.stored_name,
         "url": stored.url,
         "format": format,
         "content_type": content_type,
     }
     return ToolResult(
         content=json.dumps(
-            {"ok": True, "filename": filename, "url": stored.url, "format": format},
+            {"ok": True, "filename": stored.stored_name, "url": stored.url, "format": format},
             ensure_ascii=False,
         ),
         artifacts=[artifact],
