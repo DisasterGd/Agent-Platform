@@ -119,6 +119,44 @@ def test_runner_artifact_verification_fails_when_file_missing():
     assert [e.type for e in events].count("step_started") == 1
 
 
+def test_runner_artifact_verification_uses_stored_name():
+    """校验必须以 stored_name（磁盘真实名）为准：显示名含全角标点也不应误报“找不到”。"""
+    import uuid
+
+    from agent_platform.config import settings
+
+    settings.generated_dir.mkdir(parents=True, exist_ok=True)
+    stored = f"{uuid.uuid4().hex}.md"
+    target = settings.generated_dir / stored
+    target.write_bytes("# 内容".encode())
+    try:
+
+        async def fake_gen():
+            return ToolResult(
+                content='{"ok": true}',
+                artifacts=[
+                    {
+                        "filename": "安全教学示例：文件加解密演示（合法替代）.md",
+                        "stored_name": stored,
+                        "url": f"/api/files/generated/{stored}",
+                        "format": "md",
+                    }
+                ],
+            )
+
+        tools = ToolRegistry()
+        tools.register("fake_gen", "测试", {"type": "object", "properties": {}}, fake_gen)
+        call = ToolCall(id="c1", name="fake_gen", arguments={})
+        model = FakeModel(rounds=[([""], [call]), (["已生成文档"], [])])
+
+        runner = Runner(model=model, tools=tools)
+        events = asyncio.run(_collect(runner.run("生成文档", [{"title": "产出文档", "detail": "调用工具"}])))
+        assert [e.type for e in events].count("step_failed") == 0
+        assert runner.outcomes[0].status == "done"
+    finally:
+        target.unlink(missing_ok=True)
+
+
 def test_runner_collects_summaries_for_service():
     runner = Runner(model=FakeModel(rounds=[(["结果A"], []), (["结果B"], [])]))
     events = asyncio.run(

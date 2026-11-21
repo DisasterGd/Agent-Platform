@@ -22,6 +22,7 @@ from agent_platform.core.events import (
     step_started,
     text_delta,
 )
+from agent_platform.infrastructure.storage.local import get_storage
 from agent_platform.models.base import ChatMessage, ChatModel
 from agent_platform.tools.registry import ToolRegistry
 
@@ -129,7 +130,14 @@ class Runner:
 
     @staticmethod
     def _artifact_exists(artifact: dict[str, Any]) -> bool:
-        """程序化校验：generate_file 声明的文件必须真的在 generated 目录里。"""
+        """程序化校验：generate_file 声明的文件必须真的在 generated 目录里。
+
+        存储层落盘用可读文件名（清洗非法字符、重名自动加序号），artifact 的
+        stored_name 即磁盘真实名，校验以此为准；没有 stored_name 才退回按 filename 查找。
+        """
+        stored_name = str(artifact.get("stored_name", "")).strip()
+        if stored_name:
+            return get_storage().resolve("generated", stored_name) is not None
         filename = str(artifact.get("filename", "")).strip()
         if not filename:
             return True  # 无文件名的 artifact（如非文件类产出）不做存在性校验

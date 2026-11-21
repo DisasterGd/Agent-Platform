@@ -51,9 +51,15 @@ def artifact_ready(artifact: dict[str, Any]) -> Event:
     return Event("artifact_ready", artifact)
 
 
-def plan_created(steps: list[dict[str, Any]]) -> Event:
-    """v0.3：规划器产出了任务步骤计划（[{index,title,detail,status}...]）。"""
-    return Event("plan_created", {"steps": steps})
+def plan_created(steps: list[dict[str, Any]], conversation_id: int | None = None) -> Event:
+    """v0.3：规划器产出了任务步骤计划（[{index,title,detail,status}...]）。
+
+    conversation_id：执行开始时绑定的会话（无会话时后端已即时新建）。
+    """
+    data: dict[str, Any] = {"steps": steps}
+    if conversation_id is not None:
+        data["conversation_id"] = conversation_id
+    return Event("plan_created", data)
 
 
 def step_started(index: int, title: str) -> Event:
