@@ -11,8 +11,10 @@ class TaskRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def create(self, user_id: int, goal: str, conversation_id: int | None = None) -> Task:
-        task = Task(user_id=user_id, goal=goal, conversation_id=conversation_id)
+    def create(
+        self, user_id: int, goal: str, conversation_id: int | None = None, project_id: int | None = None
+    ) -> Task:
+        task = Task(user_id=user_id, goal=goal, conversation_id=conversation_id, project_id=project_id)
         self.db.add(task)
         self.db.commit()
         self.db.refresh(task)

@@ -31,10 +31,48 @@ class Conversation(Base):
     project_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(200), default="新会话")
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # v0.4 会话记忆：超长历史的自动压缩摘要（临时记忆，非持久化知识）
+    summary: Mapped[str] = mapped_column(Text, default="")
+    summary_covered_id: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     user: Mapped["User"] = relationship(back_populates="conversations")
     messages: Mapped[list["Message"]] = relationship(back_populates="conversation", cascade="all, delete-orphan")
+
+class Project(Base):
+    """v0.4 项目：会话与项目记忆的归属分组。"""
+    __tablename__ = "projects"
+    __table_args__ = (Index("ix_projects_user_updated", "user_id", "updated_at"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(200), default="未命名项目")
+    description: Mapped[str] = mapped_column(Text, default="")
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+class Memory(Base):
+    """v0.4 长期记忆（真正的系统级记忆：存库、可 CRUD、可启用/禁用、上下文自动注入）。
+
+    scope: global（全局，跨项目）/ project（挂在具体项目下）；
+    category 由模型归类（用户信息/用户偏好/项目/领域知识/其他）；
+    source: explicit（用户要求记住）/ auto（对话自动提炼）/ manual（界面手动添加）。
+    """
+    __tablename__ = "memories"
+    __table_args__ = (Index("ix_memories_user_scope", "user_id", "scope"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    scope: Mapped[str] = mapped_column(String(16), default="global", server_default="global")
+    project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    category: Mapped[str] = mapped_column(String(50), default="其他", server_default="其他")
+    title: Mapped[str] = mapped_column(String(200), default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(16), default="auto", server_default="auto")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 class Message(Base):
     __tablename__ = "messages"

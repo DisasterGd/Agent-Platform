@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     # 文件存储根目录（上传文件 + Agent 生成的文件），未来可替换为对象存储。
     storage_dir: str = str(_ROOT / "data")
 
+    # 三级记忆（v0.4）
+    # memory_enabled：总开关（上下文注入 + 对话后自动提炼）；用户也可在设置页关闭自动记忆
+    memory_enabled: bool = True
+    memory_char_budget: int = 4000         # 注入系统提示词的记忆字符上限
+    context_compress_chars: int = 9000     # 会话历史总字数超过该值触发自动压缩
+    context_keep_recent: int = 6           # 压缩时保留最近 N 条消息原样
+
     model_config = SettingsConfigDict(
         env_file=_ENV_FILE,
         env_file_encoding="utf-8",
