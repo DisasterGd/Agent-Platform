@@ -5,6 +5,7 @@ SSE 编码只发生在 API 层，核心层不依赖 HTTP 细节。
 
 v0.2 新增：工具调用与文件产出事件。
 v0.3 新增：任务规划与执行事件（plan_created / step_started / step_completed / step_failed）。
+v0.4 新增：记忆系统事件（context_compressed / memory_saved）。
 """
 from __future__ import annotations
 
@@ -72,6 +73,16 @@ def step_completed(index: int, summary: str, artifacts: list[dict[str, Any]] | N
 
 def step_failed(index: int, error: str) -> Event:
     return Event("step_failed", {"index": index, "error": error})
+
+
+def context_compressed(count: int) -> Event:
+    """v0.4：会话历史超长，已自动压缩 count 条早期消息为摘要。"""
+    return Event("context_compressed", {"count": count})
+
+
+def memory_saved(items: list[dict[str, Any]]) -> Event:
+    """v0.4：本轮对话写入了记忆（[{title,scope,category,source}...]）。"""
+    return Event("memory_saved", {"items": items})
 
 
 def to_sse(event: Event) -> str:

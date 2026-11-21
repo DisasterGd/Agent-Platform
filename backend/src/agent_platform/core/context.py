@@ -15,9 +15,30 @@ SYSTEM_PROMPT = (
     "列表项或段落中的公式同样必须带定界符，禁止输出不带 $ 或 $$ 的裸 LaTeX 命令。"
 )
 
+MEMORY_HEADER = (
+    "【记忆】以下是系统从历史对话中沉淀并持久化保存的记忆（可信但可能过时；"
+    "若与用户当前说法冲突，一律以用户当前说法为准）："
+)
+SUMMARY_HEADER = "【前文摘要】本会话较早的内容已自动压缩为以下摘要："
 
-def build_context(history: list[tuple[str, str]]) -> list[ChatMessage]:
-    """把数据库中的 (role, content) 历史转换为发给模型的上下文。"""
-    messages = [ChatMessage(role="system", content=SYSTEM_PROMPT)]
+
+def build_context(
+    history: list[tuple[str, str]],
+    *,
+    summary: str = "",
+    memory_block: str = "",
+) -> list[ChatMessage]:
+    """把数据库中的 (role, content) 历史转换为发给模型的上下文。
+
+    v0.4：
+    - memory_block：注入到系统提示词末尾的全局/项目记忆；
+    - summary：超长会话早期消息的自动压缩摘要，放在历史消息之前。
+    """
+    system = SYSTEM_PROMPT
+    if memory_block:
+        system = f"{system}\n\n{MEMORY_HEADER}\n{memory_block}"
+    messages = [ChatMessage(role="system", content=system)]
+    if summary:
+        messages.append(ChatMessage(role="system", content=f"{SUMMARY_HEADER}\n{summary}"))
     messages.extend(ChatMessage(role=role, content=content) for role, content in history)
     return messages
