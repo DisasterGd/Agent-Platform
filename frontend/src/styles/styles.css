@@ -223,16 +223,30 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
 .artifact-name{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .artifact-dl{color:var(--signal);font-weight:500;font-size:12px;font-family:var(--mono)}
 
-/* 工具读数条 */
-.instrument{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding:8px 12px;border:1px solid var(--line);border-radius:3px;background:var(--paper-raised);font-family:var(--mono);font-size:11px;color:var(--ink-soft)}
-.instrument-list{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
-.instrument-item{display:flex;align-items:center;gap:7px}
-.instrument-item .dot{width:7px;height:7px;border-radius:50%;background:var(--ink-faint);flex:none}
-.instrument-item .state{color:var(--ink-faint)}
-.instrument-item.running{color:var(--ink)}
-.instrument-item.running .dot{background:var(--signal);animation:pulse 1.2s infinite}
-.instrument-item.running .state{color:var(--signal)}
-.instrument-item.done .dot{background:var(--ok)}
+/* 思考过程动态展示：仅内存态，完成后虚化片刻再移除（不落库、不占磁盘） */
+.thinking-ticker{margin-bottom:10px;padding:10px 14px;border:1px solid var(--line);border-radius:4px;background:var(--paper-raised);font-family:var(--mono);font-size:11px;transition:filter .9s,opacity .9s}
+.thinking-ticker.faded{filter:blur(3px);opacity:.25}
+.tt-head{display:flex;align-items:center;gap:8px;min-width:0}
+.tt-spin{display:none;width:10px;height:10px;flex:none;border-radius:50%;border:1.5px solid var(--line-strong);border-top-color:var(--signal)}
+.tt-spin.on{display:inline-block;animation:spin 1s linear infinite}
+.tt-label{font-weight:600;color:var(--ink);flex:none}
+.tt-preview{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-faint)}
+.tt-window{position:relative;height:40px;overflow:hidden;margin-top:8px;-webkit-mask-image:linear-gradient(180deg,transparent,#000 35%,#000 65%,transparent);mask-image:linear-gradient(180deg,transparent,#000 35%,#000 65%,transparent)}
+.tt-track{display:flex;flex-direction:column;will-change:transform}
+.tt-line{display:flex;align-items:center;gap:8px;height:20px;overflow:hidden;white-space:nowrap}
+.tt-line em{font-style:normal;color:var(--ink-faint);flex:none}
+.tt-line-text{color:var(--ink-faint);overflow:hidden;text-overflow:ellipsis}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* 侧栏“正在生成”转圈 */
+.conv-spinner{display:inline-block;flex:none;width:10px;height:10px;margin-right:6px;vertical-align:-1px;border-radius:50%;border:1.5px solid var(--line-strong);border-top-color:var(--signal);animation:spin .9s linear infinite}
+
+/* 进行中标签的流光 + 实时输出光标 */
+.shimmer{background:linear-gradient(90deg,var(--signal),rgba(198,60,44,.3),var(--signal));background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shimmer-slide 1.6s linear infinite}
+@keyframes shimmer-slide{to{background-position:-200% 0}}
+.live-caret{display:inline-block;width:6px;height:14px;margin-top:4px;vertical-align:middle;background:var(--signal);animation:caret-blink 1s steps(2) infinite}
+@keyframes caret-blink{50%{opacity:0}}
+.live-waiting{color:var(--ink-faint)}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(198,60,44,.45)}70%{box-shadow:0 0 0 6px rgba(198,60,44,0)}100%{box-shadow:0 0 0 0 rgba(198,60,44,0)}}
 
 /* 输入区 */
@@ -382,6 +396,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
 }
 
 @media(prefers-reduced-motion:reduce){
-  .instrument-item.running .dot{animation:none}
+  .conv-spinner,.tt-spin.on,.shimmer,.live-caret,.thinking-ticker .tt-track{animation:none}
+  .thinking-ticker{transition:none}
   *{transition:none!important}
 }

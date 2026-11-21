@@ -5,14 +5,20 @@ import Markdown from "./components/Markdown";
 import SettingsModal from "./components/SettingsModal";
 import ConfirmDialog, { type ConfirmState } from "./components/ConfirmDialog";
 import TaskCard from "./components/TaskCard";
+import ThinkingTicker, { useThinkingTracker } from "./components/ThinkingTicker";
 import type { Artifact, Attachment, Conversation, Message, StreamEvent, Task } from "./types/chat";
 
 const TOOL_LABELS: Record<string, string> = {
   web_search: "联网搜索",
+  fetch_url: "抓取网页",
   generate_file: "生成文件",
 };
 
-type ToolEntry = { name: string; state: "running" | "done" };
+/** 与后端 provisional_title 保持一致：生成阶段先用截取标题，完成后模型精炼。 */
+function truncTitle(content: string): string {
+  const text = content.replace(/\s+/g, " ").trim();
+  return text.slice(0, 20) + (text.length > 20 ? "…" : "");
+}
 
 /** 版本链分组结果：同一 group 的多个消息变体合并为一个气泡，可左右翻页。 */
 type Turn = { key: number; role: "user" | "assistant"; items: Message[] };
@@ -57,7 +63,10 @@ export default function App() {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
-  const [toolLog, setToolLog] = useState<ToolEntry[]>([]);
+  // 思考过程动态展示（仅内存态，不落库；完成后虚化再移除）
+  const thinking = useThinkingTracker();
+  // 正在生成的会话 id：侧栏该行显示转圈动画
+  const [generatingConvId, setGeneratingConvId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
@@ -265,18 +274,20 @@ export default function App() {
 
   function streamHandlers(assistantId: number): StreamHandlers {
     return {
-      onDelta: delta => setMessages(current => current.map(m =>
-        m.id === assistantId ? { ...m, content: m.content + delta } : m
-      )),
-      onToolStart: name => setToolLog(log => [...log, { name, state: "running" as const }]),
-      onToolEnd: () => setToolLog(log => {
-        const idx = log.reduce<number>((acc, t, i) => (t.state === "running" ? i : acc), -1);
-        if (idx < 0) return log;
-        return log.map((t, i) => (i === idx ? { ...t, state: "done" as const } : t));
-      }),
-      onArtifact: (artifact: Artifact) => setMessages(current => current.map(m =>
-        m.id === assistantId ? { ...m, artifacts: [...(m.artifacts || []), artifact] } : m
-      )),
+      onDelta: delta => {
+        setMessages(current => current.map(m =>
+          m.id === assistantId ? { ...m, content: m.content + delta } : m
+        ));
+        thinking.appendText(delta);
+      },
+      onToolStart: name => thinking.pushLabel(`正在${TOOL_LABELS[name] || name}…`),
+      onToolEnd: () => thinking.pushLabel("继续生成回复…"),
+      onArtifact: (artifact: Artifact) => {
+        setMessages(current => current.map(m =>
+          m.id === assistantId ? { ...m, artifacts: [...(m.artifacts || []), artifact] } : m
+        ));
+        thinking.pushLabel(`已生成文件 ${artifact.filename}`);
+      },
     };
   }
 
@@ -285,10 +296,18 @@ export default function App() {
     if (!content || busy) return;
     setError("");
     if (taskMode) {
-      // 任务模式：只创建任务（规划出计划），审阅后在卡片上点“执行计划”
+      // 任务模式：先落一个会话（生成阶段即建会话），再创建任务；审阅后在卡片上点“执行计划”
       setBusy(true);
+      thinking.begin("正在拆解任务、生成计划…");
       try {
-        const task = await tasksApi.create(content, activeId);
+        let cid = activeId;
+        if (cid === null) {
+          const item = await chatApi.createConversation(truncTitle(content));
+          cid = item.id;
+          setActiveId(cid);
+          setConversations(cur => [item, ...cur]);
+        }
+        const task = await tasksApi.create(content, cid);
         setLiveTask(task);
         setLiveText("");
         setInput("");
@@ -296,19 +315,21 @@ export default function App() {
       } catch (e) {
         setError(e instanceof Error ? e.message : "任务创建失败");
       } finally {
+        thinking.end();
         setBusy(false);
       }
       return;
     }
     setBusy(true);
-    setToolLog([]);
+    thinking.begin("正在生成回复…");
     let id = activeId;
     try {
       if (id === null) {
+        // 生成阶段就创建会话：内容、失败与中断都有处可归
         const item = await chatApi.createConversation();
         id = item.id;
         setActiveId(id);
-        await refresh();
+        setConversations(cur => [{ ...item, title: truncTitle(content) }, ...cur]);
       }
       const sentAttachments = [...attachments];
       const userMessage: Message = {
@@ -324,15 +345,23 @@ export default function App() {
       setMessages(current => [...current, userMessage, assistantMessage]);
       setInput("");
       setAttachments([]);
+      setGeneratingConvId(id);
       await chatApi.streamMessage(id, content, sentAttachments, streamHandlers(assistantId));
-      await load(id); // 用服务端权威数据回填 id / 版本链字段
+      // 用户已切走时不再强行跳回；服务端已落库（含部分产出），切回来即可看到
+      if (activeIdRef.current === null || activeIdRef.current === id) await load(id);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "发送消息失败");
       if (id !== null) {
-        try { await load(id); } catch { /* keep original error */ }
+        if (activeIdRef.current === null || activeIdRef.current === id) {
+          try { await load(id); } catch { /* keep original error */ }
+        } else {
+          try { await refresh(); } catch { /* 列表刷新失败保留原错误 */ }
+        }
       }
     } finally {
+      setGeneratingConvId(null);
+      thinking.end();
       setBusy(false);
     }
   }
@@ -346,7 +375,8 @@ export default function App() {
     const edited = trimmed !== undefined && trimmed !== "" && trimmed !== raw.content;
     setError("");
     setBusy(true);
-    setToolLog([]);
+    thinking.begin("正在重新生成…");
+    setGeneratingConvId(convId);
     setEditingMsgId(null);
     setEditDraft("");
 
@@ -380,19 +410,35 @@ export default function App() {
       setError(e instanceof Error ? e.message : "重新生成失败");
       try { await load(convId); } catch { /* keep original error */ }
     } finally {
+      setGeneratingConvId(null);
+      thinking.end();
       setBusy(false);
     }
   }
 
-  /** v0.3：任务执行事件 → 卡片状态。 */
+  /** v0.3：任务执行事件 → 卡片状态 + 思考过程展示。 */
   function handleTaskEvent(ev: StreamEvent) {
     switch (ev.type) {
-      case "plan_created":
+      case "plan_created": {
         setLiveText("");
         setLiveTask(t => (t ? { ...t, status: "running", steps: ev.steps ?? t.steps } : t));
+        const cid = ev.conversation_id ?? null;
+        if (cid !== null) {
+          // 执行开始即绑定/新建会话：侧栏立刻可见，失败也有记录可回看
+          setGeneratingConvId(cid);
+          setConversations(cur => cur.map(c =>
+            c.id === cid && c.title === "新会话"
+              ? { ...c, title: truncTitle(liveTask?.goal ?? c.title) }
+              : c
+          ));
+          void refresh().catch(() => undefined);
+        }
+        thinking.pushLabel("计划已确认，开始执行");
         break;
+      }
       case "step_started":
         setLiveText("");
+        thinking.pushLabel(`执行步骤 ${(ev.index ?? 0) + 1}：${ev.title ?? ""}`);
         setLiveTask(t => (t ? { ...t, status: "running", steps: t.steps.map(s => (s.idx === ev.index ? { ...s, status: "running" as const } : s)) } : t));
         break;
       case "text_delta":
@@ -405,11 +451,13 @@ export default function App() {
         break;
       case "step_completed":
         setLiveText("");
+        thinking.pushLabel(`步骤 ${(ev.index ?? 0) + 1} 完成`);
         setLiveTask(t => (t ? { ...t, steps: t.steps.map(s => (s.idx === ev.index
           ? { ...s, status: "done" as const, summary: ev.summary ?? "", artifacts: ev.artifacts ?? s.artifacts }
           : s)) } : t));
         break;
       case "step_failed":
+        thinking.pushLabel(`⚠ 步骤 ${(ev.index ?? 0) + 1} 失败：${ev.error ?? ""}`);
         setLiveTask(t => (t ? { ...t, status: "failed", steps: t.steps.map(s => (s.idx === ev.index ? { ...s, status: "failed" as const, error: ev.error ?? "" } : s)) } : t));
         break;
       case "task_completed": {
@@ -428,7 +476,7 @@ export default function App() {
   async function executeTask(taskId: number) {
     if (busy) return;
     setBusy(true);
-    setToolLog([]);
+    thinking.begin("准备执行计划…");
     setError("");
     try {
       // streamHandlers(-1)：占位消息 id 不存在 → onDelta 无副作用，只借工具读数与事件旁路
@@ -436,19 +484,25 @@ export default function App() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "任务执行失败");
     } finally {
+      thinking.end();
       setBusy(false);
     }
+    setGeneratingConvId(null);
     try {
       const latest = await tasksApi.get(taskId);
-      if (latest.status === "completed") {
-        setLiveTask(null);
-        setLiveText("");
-        const cid = latest.conversation_id;
-        if (cid !== null && (activeIdRef.current === null || activeIdRef.current === cid)) await load(cid);
-        await refresh();
-      } else {
-        setLiveTask(latest);
+      const cid = latest.conversation_id;
+      const staying = activeIdRef.current === null || activeIdRef.current === cid;
+      if (staying) {
+        // 成功/失败都已绑定会话：回到会话即可看到目标、记录与任务卡片
+        if (latest.status === "completed") {
+          setLiveTask(null);
+          setLiveText("");
+        } else {
+          setLiveTask(latest);
+        }
+        if (cid !== null) await load(cid);
       }
+      await refresh();
     } catch { /* 同步失败保留现场 */ }
   }
 
@@ -549,6 +603,9 @@ export default function App() {
             <button className="conv-title" title={c.title}
               onClick={() => (selectMode ? toggleSelect(c.id) : void load(c.id))}
               onDoubleClick={() => startEdit(c)}>
+              {generatingConvId === c.id && (
+                <span className="conv-spinner" role="status" aria-label="正在生成" title="正在生成" />
+              )}
               {c.pinned && <span className="conv-pin-flag" title="已置顶">📌</span>}
               {c.title}
             </button>
@@ -577,7 +634,7 @@ export default function App() {
         <div className="topbar-title">{activeConv?.title ?? "主界面"}</div>
         <div className="topbar-meta">
           <span className="meta-item">模型 <b>DeepSeek</b></span>
-          <span className="meta-item">v0.3.0</span>
+          <span className="meta-item">v0.3.2</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
@@ -710,19 +767,7 @@ export default function App() {
       </section>
 
       <div className="composer-wrap">
-        {toolLog.length > 0 && (
-          <div className="instrument">
-            <div className="instrument-list">
-              {toolLog.map((t, i) => (
-                <span key={i} className={`instrument-item ${t.state}`}>
-                  <span className="dot" />
-                  {TOOL_LABELS[t.name] || t.name}
-                  <span className="state">{t.state === "running" ? "进行中" : "已完成"}</span>
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+        <ThinkingTicker tracker={thinking} />
         {error && <div className="error">{error}</div>}
         <div className="composer">
           {attachments.length > 0 && (

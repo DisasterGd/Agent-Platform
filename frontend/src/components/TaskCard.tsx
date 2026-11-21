@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Task, TaskStepStatus } from "../types/chat";
 import Markdown from "./Markdown";
 
@@ -38,6 +38,13 @@ export default function TaskCard({ task, liveText, busy, onExecute, onCancel, on
   const editable = task.status === "awaiting_approval" && !busy;
   const [drafts, setDrafts] = useState<StepDraft[]>([]);
   const [saving, setSaving] = useState(false);
+  const liveRef = useRef<HTMLDivElement>(null);
+
+  // 执行中的实时输出：新内容到达即跟随到底部（滚动节奏跟执行速度一致）
+  useEffect(() => {
+    const el = liveRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [liveText]);
 
   useEffect(() => {
     setDrafts(task.steps.map(s => ({ title: s.title, detail: s.detail })));
@@ -112,10 +119,14 @@ export default function TaskCard({ task, liveText, busy, onExecute, onCancel, on
                 <>
                   <div className="task-step-line">
                     <b>{s.title}</b>
-                    <em>{STEP_LABEL[s.status]}</em>
+                    <em className={s.status === "running" ? "shimmer" : undefined}>{STEP_LABEL[s.status]}</em>
                   </div>
-                  {s.status === "running" && liveText && (
-                    <div className="task-step-live"><Markdown content={liveText} /></div>
+                  {s.status === "running" && (
+                    <div className="task-step-live" ref={liveRef}>
+                      {liveText
+                        ? <><Markdown content={liveText} /><span className="live-caret" aria-hidden /></>
+                        : <span className="live-waiting">正在思考…</span>}
+                    </div>
                   )}
                   {s.status === "done" && s.summary && (
                     <div className="task-step-summary" title={s.summary}>{clip(s.summary)}</div>
