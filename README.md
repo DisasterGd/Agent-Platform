@@ -1,4 +1,4 @@
-# Agent Platform v0.3.2
+# Agent Platform v0.4
 
 本地优先的智能 Agent 平台：React + TypeScript + Vite、FastAPI、MySQL、SQLAlchemy 2.x、Alembic、SSE，默认接入 DeepSeek（OpenAI 兼容接口）。
 
@@ -50,6 +50,20 @@
 - 同名不覆盖，自动追加序号：`报告.md` → `报告 (2).md` → `报告 (3).md`
 - 自动清洗 Windows 非法字符与保留设备名（`CON.txt` → `_CON.txt`），拒绝路径穿越但保留 `a..b.md` 这类合法名
 - 历史 uuid 命名的旧文件不受影响，旧链接照常可下载
+
+**v0.4（三级记忆系统）**
+
+- **全局记忆**：存数据库 `memories` 表（系统级真记忆，可查/编/删/启停，非 CLAUDE.md 式静态文档）。
+  每轮对话结束由模型自动提炼原子化记忆并自行归类（用户信息 / 用户偏好 / 项目 / 领域知识 / 其他）；
+  用户说“请记住…”的内容以更高优先级落库并标记来源“用户要求记住”；同标题自动合并更新，不堆重复
+- **项目记忆**：左侧新增项目栏——新建、重命名、置顶、删除（会话退回未分组、不删会话）；
+  会话归属所选项目，构建上下文时“全局记忆 + 当前项目记忆”一并注入系统提示词（有字符预算）
+- **会话记忆（自动压缩）**：上下文超过阈值（默认 9000 字）时，用模型总结能力把早期消息滚动压缩为摘要
+  （`conversations.summary`），上下文 = 摘要 + 最近若干条原样消息；前端思考面板会提示“已压缩 n 条”
+- **设置 → 记忆**：记忆可视化管理界面——按作用域切换、按类别分组、来源徽章、编辑/启停/两步确认删除、手动添加；
+  “自动记忆”开关（关闭后停止提炼与注入，仍可手动管理）
+- 记忆与压缩事件并入“思考过程”面板：`context_compressed`、`memory_saved`
+- 新增迁移 `0006_memory`（projects / memories 表 + 会话摘要列）；任务执行器同样注入记忆
 
 当前开发用户 ID 仅用于本地单用户开发，不是身份认证；公网部署前必须实现真实认证和服务端权限校验。
 
@@ -125,7 +139,7 @@ python ..\scripts\init_db.py
 python run.py
 ```
 
-- `alembic upgrade head` 创建 `users` / `conversations` / `messages` / `tasks` / `task_steps` 五张表（消息版本链、任务表由后续迁移自动补齐）。
+- `alembic upgrade head` 创建 `users` / `conversations` / `messages` / `tasks` / `task_steps` / `projects` / `memories` 七张表（消息版本链、任务与记忆表由迁移补齐）。
 - `init_db.py` 补一个开发用户（id=1）并做幂等建表兜底。
 - `run.py` 一键启动后端并同时托管已构建的 `frontend/dist`，自动打开浏览器。
 
@@ -159,6 +173,7 @@ npm run dev
 5. 工具调用：发送「帮我查一下今天的热点新闻」应触发联网搜索；发送「写一份周报并导出成 PDF」应触发文件生成并出现下载卡片。
 6. 重新生成：对最后一轮回复点「重新生成」，旧回答保留，气泡上出现 `‹ 2/2 ›` 可翻页回看。
 7. 任务模式：打开输入框左侧「任务模式」，发送一个多步目标（如「调研三款 AI 搜索产品，对比功能并写成 Word 报告」），先出现可编辑的步骤计划，点「执行计划」后逐步点亮状态，完成后可在会话中看到最终总结与产物文件。
+8. 记忆（v0.4）：对话里说「请记住我以后都用中文写注释」，思考面板应提示写入记忆；打开「设置 → 记忆」能看到该条（来源=用户要求记住）；新开一个会话提问时，模型应表现出已知该偏好。在项目栏新建项目并选中后，新会话归属该项目，其项目记忆只在选中之生效。
 
 ## 联网搜索
 
@@ -177,20 +192,21 @@ SEARCH_PROVIDER=tavily       # Tavily（面向 LLM 的搜索 API，需 SEARCH_AP
 
 ```text
 backend/
-  apps/api/                  FastAPI 入口与路由（chat / tasks / files / settings / auth / health）
+  apps/api/                  FastAPI 入口与路由（chat / tasks / projects / memories / files / settings / auth / health）
   src/agent_platform/        核心库
-    core/                    agent.py 工具循环 · planner.py 任务规划 · runner.py 任务执行 · events.py 事件词汇表 · context.py 上下文
+    core/                    agent.py 工具循环 · planner.py 任务规划 · runner.py 任务执行 · events.py 事件词汇表 · context.py 上下文(摘要+记忆注入)
+    memory/                  v0.4 三级记忆：manager 门面 · conversation 历史压缩 · long_term 提炼/归类/注入
     models/                  大模型适配层（供应商登记表）
     tools/                   工具注册表 + 内置工具（web_search / fetch_url / generate_file）
-    services/                业务用例层（chat_service · task_service · settings_service）
-    repositories/            数据访问层（conversations · messages(版本链) · tasks）
-    infrastructure/          database / storage / search / generation / attachments
-  migrations/                Alembic 迁移（0001–0005）
+    services/                业务用例层（chat_service · task_service · project_service · memory_service · settings_service）
+    repositories/            数据访问层（conversations · messages(版本链) · tasks · projects · memories）
+    infrastructure/          database / storage(可读命名+去重) / search / generation / attachments
+  migrations/                Alembic 迁移（0001–0006）
   pyproject.toml             后端依赖（pip install -e ".[dev]"）
 frontend/
   src/
-    components/              Markdown 富渲染 · TaskCard 任务卡 · ConfirmDialog 确认弹窗 · SettingsModal
-    services/                api / chat(SSE) / tasks / settings
+    components/              Markdown 富渲染 · TaskCard 任务卡 · ThinkingTicker 思考面板 · MemoryPanel 记忆管理 · ConfirmDialog 确认弹窗 · SettingsModal
+    services/                api / chat(SSE) / tasks / projects / memories / settings
     styles/                  设计令牌（浅色/深色）
     types/                   类型定义
 scripts/                     check_db.py / init_db.py
@@ -206,8 +222,8 @@ data/                        上传与生成的文件、settings.json（gitignor
 | v0.1 | 基础聊天、流式输出 | 打通前后端与模型 | ✅ |
 | v0.2 | 工具调用 | 让模型能够使用外部工具 | ✅ |
 | v0.3 | 任务规划与执行 | 支持多步骤任务 | ✅ |
-| v0.4 | 记忆系统 | 保存和检索长期记忆 | 下一步 |
-| v0.5 | 知识库 | 支持文档上传、切块和检索 | |
+| v0.4 | 记忆系统 | 保存和检索长期记忆 | ✅ |
+| v0.5 | 知识库 | 支持文档上传、切块和检索 | 下一步 |
 | v0.6 | 多模型管理 | 支持不同模型切换 | |
 | v0.7 | 账号体系 | 注册、登录、权限管理 | |
 | v0.8 | 云端部署 | 多用户在线服务 | |
@@ -223,4 +239,5 @@ data/                        上传与生成的文件、settings.json（gitignor
 - Repository 封装数据库读写；Session 按请求创建和关闭。
 - Agent Core 不依赖 FastAPI Request/Response，保持可独立演进；Planner / Runner 同样只依赖模型协议。
 - 任务执行开始（生成阶段）即绑定会话并写入目标消息，完成或失败都写回结果；删除会话会级联删除其任务与步骤。
+- 记忆持久化≠作用域：memories 按 scope（global/project）检索注入；会话摘要只是临时记忆，随会话删除；删除项目只清其项目记忆，会话退回未分组。
 - 云端版本必须替换开发身份依赖，增加认证、权限、限流、HTTPS 和密钥管理。

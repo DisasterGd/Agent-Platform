@@ -1,33 +1,47 @@
-# API v0.2
+# API v0.4
 
 | Method | Path | 用途 |
 |---|---|---|
 | GET | `/api/health` | API 健康检查 |
 | GET | `/api/health/database` | 数据库连接检查 |
-| GET | `/api/conversations` | 会话列表 |
-| POST | `/api/conversations` | 创建会话 |
-| PATCH | `/api/conversations/{id}` | 重命名会话 |
-| GET | `/api/conversations/{id}/messages` | 读取消息 |
-| POST | `/api/chat/stream` | SSE 流式回复（支持工具调用） |
+| GET | `/api/conversations?project_id=` | 会话列表（`project_id` 省略=全部，`none`=未分组，数字=指定项目） |
+| POST | `/api/conversations` | 创建会话（可带 `project_id`） |
+| PATCH | `/api/conversations/{id}` | 重命名 / 置顶 |
+| DELETE | `/api/conversations/{id}` | 删除会话（级联删除消息与任务） |
+| GET | `/api/conversations/{id}/messages` | 读取消息（含版本链全部变体） |
+| POST | `/api/chat/stream` | SSE 流式回复（工具调用、附件、记忆注入） |
+| POST | `/api/chat/regenerate` | 重新生成最后一轮回复（版本链追加） |
+| GET/POST/PATCH/DELETE | `/api/projects[/{id}]` | v0.4 项目：列表 / 新建 / 重命名、改描述、置顶 / 删除 |
+| GET/POST/PATCH/DELETE | `/api/memories[/{id}]` | v0.4 记忆：查询（`scope`、`project_id` 过滤）/ 手动添加 / 编辑、启停 / 删除 |
 | POST | `/api/files` | 上传文件/图片（multipart） |
-| GET | `/api/files/{category}/{name}` | 下载上传/生成的文件 |
+| GET | `/api/files/{category}/{name}` | 下载上传/生成的文件（可读文件名） |
+| GET/PUT | `/api/settings` | 模型配置 + `memory_enabled` 自动记忆开关 |
+| POST | `/api/tasks` | v0.3 创建任务（规划步骤，`awaiting_approval`） |
+| PUT | `/api/tasks/{id}/steps` | 审阅阶段编辑计划 |
+| POST | `/api/tasks/{id}/execute` | SSE 流式执行（`plan_created`/`step_*`/`task_completed`） |
+| POST | `/api/tasks/{id}/cancel` | 取消/删除任务 |
+| GET | `/api/tasks?conversation_id=` / `/api/tasks/{id}` | 任务查询 |
 
 ## 聊天流（`POST /api/chat/stream`）
 
 请求体：
 ```json
-{"conversation_id": 1, "content": "帮我查一下今天的天气，并生成一份报告"}
+{"conversation_id": 1, "content": "帮我查一下今天的天气，并生成一份报告", "attachments": []}
 ```
 
-SSE 事件：`task_started`、`text_delta`、`tool_started`、`tool_completed`、`artifact_ready`、`task_completed`、`error`。
+SSE 事件：`task_started`、`text_delta`、`tool_started`、`tool_completed`、`artifact_ready`、
+`context_compressed`、`memory_saved`、`task_completed`、`error`。
 
 - `text_delta`：`{"content": "..."}` 增量文本
 - `tool_started` / `tool_completed`：`{"name": "web_search"}` 工具调用开始/结束
-- `artifact_ready`：`{"filename", "url", "format", "content_type"}` Agent 生成的可下载文件
+- `artifact_ready`：`{"filename", "stored_name", "url", "format", "content_type"}` 生成的可下载文件（显示名=磁盘名=URL 尾段，重名自动加 ` (2)`）
+- `context_compressed`：`{"count": n}` v0.4 超长历史已自动压缩 n 条为摘要（会话记忆）
+- `memory_saved`：`{"items": [{"title","scope","category","source"}]}` v0.4 本轮写入的全局/项目记忆
 
 ## 内置工具
 
 | 工具 | 说明 |
 |---|---|
-| `web_search` | 联网搜索（DuckDuckGo / Tavily / Bing，由 `SEARCH_PROVIDER` 决定） |
+| `web_search` | 联网搜索（provider=auto：DuckDuckGo → Bing 网页抓取兜底，可换 bing/tavily） |
+| `fetch_url` | 读取搜索结果链接正文 |
 | `generate_file` | 生成 md / docx / pdf 文件 |
