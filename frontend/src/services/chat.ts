@@ -69,10 +69,10 @@ export async function streamSSE(url: string, body: unknown, handlers: StreamHand
 export const chatApi = {
   listConversations: () => request<Conversation[]>("/api/conversations"),
 
-  createConversation: (title = "新会话") =>
+  createConversation: (title = "新会话", projectId: number | null = null) =>
     request<Conversation>("/api/conversations", {
       method: "POST",
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title, project_id: projectId }),
     }),
 
   updateConversation: (id: number, patch: { title?: string; pinned?: boolean }) =>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { settingsApi, type ModelConfig, type Preset } from "../services/settings";
+import MemoryPanel from "./MemoryPanel";
 
 interface Props {
   theme: "light" | "dark";
@@ -7,7 +8,9 @@ interface Props {
   onClose: () => void;
 }
 
-const FIELDS: { key: keyof ModelConfig; label: string; secret?: boolean }[] = [
+type ModelField = "base_url" | "api_key" | "model" | "vision_model";
+
+const FIELDS: { key: ModelField; label: string; secret?: boolean }[] = [
   { key: "base_url", label: "Base URL" },
   { key: "api_key", label: "API Key", secret: true },
   { key: "model", label: "模型" },
@@ -15,6 +18,7 @@ const FIELDS: { key: keyof ModelConfig; label: string; secret?: boolean }[] = [
 ];
 
 export default function SettingsModal({ theme, onThemeChange, onClose }: Props) {
+  const [tab, setTab] = useState<"model" | "memory">("model");
   const [config, setConfig] = useState<ModelConfig>({
     provider: "deepseek", base_url: "", api_key: "", model: "", vision_model: "",
   });
@@ -60,7 +64,13 @@ export default function SettingsModal({ theme, onThemeChange, onClose }: Props) 
           <button className="modal-close" title="关闭" onClick={onClose}>×</button>
         </div>
 
+        <div className="modal-tabs">
+          <button type="button" className={tab === "model" ? "on" : ""} onClick={() => setTab("model")}>模型</button>
+          <button type="button" className={tab === "memory" ? "on" : ""} onClick={() => setTab("memory")}>记忆</button>
+        </div>
+
         <div className="modal-body">
+          {tab === "memory" ? <MemoryPanel /> : (<>
           <section className="set-section">
             <h3>主题</h3>
             <div className="theme-toggle">
@@ -104,6 +114,7 @@ export default function SettingsModal({ theme, onThemeChange, onClose }: Props) 
               {saving ? "保存中…" : saved ? "已保存" : "保存"}
             </button>
           </section>
+          </>)}
         </div>
       </div>
     </div>

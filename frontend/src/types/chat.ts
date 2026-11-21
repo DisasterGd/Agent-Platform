@@ -2,8 +2,41 @@ export interface Conversation {
   id: number;
   title: string;
   pinned: boolean;
+  /** v0.4 项目归属：null = 未分组 */
+  project_id?: number | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface Project {
+  id: number;
+  user_id: number;
+  name: string;
+  description: string;
+  pinned: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Memory {
+  id: number;
+  scope: "global" | "project";
+  project_id: number | null;
+  category: string;
+  title: string;
+  content: string;
+  /** explicit=用户要求记住 / auto=对话自动提炼 */
+  source: "explicit" | "auto" | string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemorySavedItem {
+  title?: string;
+  scope?: string;
+  category?: string;
+  source?: string;
 }
 
 export interface Attachment {
@@ -50,6 +83,9 @@ export interface StreamEvent {
   artifacts?: Artifact[];
   status?: Task["status"];
   conversation_id?: number;
+  /** v0.4 记忆事件字段 */
+  count?: number;
+  items?: MemorySavedItem[];
 }
 
 export type TaskStatus = "awaiting_approval" | "running" | "completed" | "failed" | "cancelled";

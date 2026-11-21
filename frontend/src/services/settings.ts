@@ -6,6 +6,8 @@ export interface ModelConfig {
   api_key: string;
   model: string;
   vision_model: string;
+  /** v0.4 自动记忆开关（后端会一并返回/保存） */
+  memory_enabled?: boolean;
 }
 
 export interface Preset {

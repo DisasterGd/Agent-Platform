@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { chatApi, type StreamHandlers } from "./services/chat";
 import { tasksApi } from "./services/tasks";
+import { projectsApi } from "./services/projects";
 import Markdown from "./components/Markdown";
 import SettingsModal from "./components/SettingsModal";
 import ConfirmDialog, { type ConfirmState } from "./components/ConfirmDialog";
 import TaskCard from "./components/TaskCard";
 import ThinkingTicker, { useThinkingTracker } from "./components/ThinkingTicker";
-import type { Artifact, Attachment, Conversation, Message, StreamEvent, Task } from "./types/chat";
+import type { Artifact, Attachment, Conversation, Message, Project, StreamEvent, Task } from "./types/chat";
 
 const TOOL_LABELS: Record<string, string> = {
   web_search: "联网搜索",
@@ -86,6 +87,14 @@ export default function App() {
   const [taskMode, setTaskMode] = useState(false);
   const [liveTask, setLiveTask] = useState<Task | null>(null);
   const [liveText, setLiveText] = useState("");
+  // v0.4 项目栏：projectFilter = "all" 全部 / "none" 未分组 / number 指定项目
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectFilter, setProjectFilter] = useState<"all" | "none" | number>("all");
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [draftProject, setDraftProject] = useState("");
+  const [projMenuFor, setProjMenuFor] = useState<number | null>(null);
+  const [editingProjId, setEditingProjId] = useState<number | null>(null);
+  const [draftProjName, setDraftProjName] = useState("");
   // 会话侧边栏：更多菜单 / 多选
   const [menuFor, setMenuFor] = useState<number | null>(null);
   const [selectMode, setSelectMode] = useState(false);
@@ -103,8 +112,12 @@ export default function App() {
   }, [theme]);
 
   const refresh = useCallback(async () => {
-    const items = await chatApi.listConversations();
+    const [items, projs] = await Promise.all([
+      chatApi.listConversations(),
+      projectsApi.list().catch(() => [] as Project[]),
+    ]);
     setConversations(items);
+    setProjects(projs);
     return items;
   }, []);
 
@@ -154,6 +167,62 @@ export default function App() {
     setMenuFor(null);
     setSelectMode(false);
     setSelectedIds(new Set());
+  }
+
+  // ---------- v0.4 项目栏 ----------
+
+  async function createProject() {
+    const name = draftProject.trim();
+    setCreatingProject(false);
+    setDraftProject("");
+    if (!name) return;
+    try {
+      setError("");
+      const p = await projectsApi.create(name);
+      setProjects(cur => [p, ...cur]);
+      setProjectFilter(p.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "项目创建失败");
+    }
+  }
+
+  async function renameProject(id: number, name: string) {
+    setEditingProjId(null);
+    const next = name.trim();
+    if (!next || next === projects.find(p => p.id === id)?.name) return;
+    try {
+      setError("");
+      const p = await projectsApi.update(id, { name: next });
+      setProjects(cur => cur.map(x => (x.id === id ? p : x)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "重命名失败");
+    }
+  }
+
+  async function pinProject(p: Project) {
+    try {
+      setError("");
+      await projectsApi.update(p.id, { pinned: !p.pinned });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "置顶失败");
+    }
+  }
+
+  async function removeProject(p: Project) {
+    const ok = await askConfirm(
+      "删除项目",
+      `删除项目「${p.name}」？其中的会话会退回“未分组”（不删除），项目记忆将被清除。`,
+    );
+    if (!ok) return;
+    try {
+      setError("");
+      await projectsApi.remove(p.id);
+      if (projectFilter === p.id) setProjectFilter("all");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "删除项目失败");
+    }
   }
 
   function startEdit(c: Conversation) {
@@ -288,6 +357,14 @@ export default function App() {
         ));
         thinking.pushLabel(`已生成文件 ${artifact.filename}`);
       },
+      onEvent: ev => {
+        if (ev.type === "context_compressed") {
+          thinking.pushLabel(`前文过长：已把 ${ev.count ?? 0} 条早期消息自动压缩为摘要`);
+        } else if (ev.type === "memory_saved" && ev.items && ev.items.length > 0) {
+          const names = ev.items.map(i => i.title).filter(Boolean).slice(0, 2).join("、");
+          thinking.pushLabel(`已写入 ${ev.items.length} 条记忆${names ? `：${names}` : ""}`);
+        }
+      },
     };
   }
 
@@ -302,7 +379,7 @@ export default function App() {
       try {
         let cid = activeId;
         if (cid === null) {
-          const item = await chatApi.createConversation(truncTitle(content));
+          const item = await chatApi.createConversation(truncTitle(content), typeof projectFilter === "number" ? projectFilter : null);
           cid = item.id;
           setActiveId(cid);
           setConversations(cur => [item, ...cur]);
@@ -325,8 +402,8 @@ export default function App() {
     let id = activeId;
     try {
       if (id === null) {
-        // 生成阶段就创建会话：内容、失败与中断都有处可归
-        const item = await chatApi.createConversation();
+        // 生成阶段就创建会话：内容、失败与中断都有处可归；归属当前选中项目
+        const item = await chatApi.createConversation(truncTitle(content), typeof projectFilter === "number" ? projectFilter : null);
         id = item.id;
         setActiveId(id);
         setConversations(cur => [{ ...item, title: truncTitle(content) }, ...cur]);
@@ -557,9 +634,14 @@ export default function App() {
   const questions = turns.filter(t => t.role === "user" && t.items[t.items.length - 1].content.trim());
   const activeConv = conversations.find(c => c.id === activeId);
   const lastUserTurn = [...turns].reverse().find(t => t.role === "user");
+  const projectName = (id: number | null) =>
+    id === null ? "未分组" : projects.find(p => p.id === id)?.name ?? "未分组";
   const visible = conversations.filter(c => {
     const kw = search.trim().toLowerCase();
-    return !kw || c.title.toLowerCase().includes(kw);
+    if (kw && !c.title.toLowerCase().includes(kw)) return false;
+    if (projectFilter === "all") return true;
+    if (projectFilter === "none") return !c.project_id;
+    return c.project_id === projectFilter;
   });
   visibleIdsRef.current = visible.map(c => c.id);
 
@@ -567,8 +649,59 @@ export default function App() {
     <aside className="sidebar">
       <div className="brand"><b className="mark">◉</b><div className="brand-word"><strong>Agent</strong><span>工作台</span></div></div>
       <button className="new" onClick={openHome}>新建会话</button>
+      <div className="section-label proj-head">
+        <span>项目</span>
+        <button type="button" className="proj-add" title="新建项目" aria-label="新建项目"
+          onClick={() => setCreatingProject(true)}>＋</button>
+      </div>
+      <div className="proj-chips">
+        <button type="button" className={`proj-chip ${projectFilter === "all" ? "on" : ""}`}
+          onClick={() => setProjectFilter("all")}>全部</button>
+        {projects.map(p => (
+          <div key={p.id} className={`proj-chip-wrap ${projectFilter === p.id ? "on" : ""}`}>
+            {editingProjId === p.id ? (
+              <input className="proj-chip-input" autoFocus value={draftProjName}
+                onChange={e => setDraftProjName(e.target.value)}
+                onBlur={() => void renameProject(p.id, draftProjName)}
+                onKeyDown={e => {
+                  if (e.key === "Enter") { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); }
+                  if (e.key === "Escape") setEditingProjId(null);
+                }} />
+            ) : (
+              <button type="button" className="proj-chip" title={p.description || p.name}
+                onClick={() => setProjectFilter(projectFilter === p.id ? "all" : p.id)}
+                onDoubleClick={() => { setEditingProjId(p.id); setDraftProjName(p.name); }}>
+                {p.pinned && "📌"}{p.name}
+                <span className="proj-chip-more" role="button" aria-label="项目操作"
+                  onClick={e => { e.stopPropagation(); setProjMenuFor(projMenuFor === p.id ? null : p.id); }}>⋯</span>
+              </button>
+            )}
+            {projMenuFor === p.id && (
+              <>
+                <div className="menu-scrim" onClick={() => setProjMenuFor(null)} />
+                <div className="conv-menu proj-menu">
+                  <button type="button" onClick={() => { setProjMenuFor(null); setEditingProjId(p.id); setDraftProjName(p.name); }}>重命名</button>
+                  <button type="button" onClick={() => { setProjMenuFor(null); void pinProject(p); }}>{p.pinned ? "取消置顶" : "置顶"}</button>
+                  <button type="button" className="danger" onClick={() => { setProjMenuFor(null); void removeProject(p); }}>删除</button>
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+        <button type="button" className={`proj-chip ${projectFilter === "none" ? "on" : ""}`}
+          onClick={() => setProjectFilter("none")}>未分组</button>
+        {creatingProject && (
+          <input className="proj-chip-input" autoFocus placeholder="项目名，Enter 创建"
+            value={draftProject} onChange={e => setDraftProject(e.target.value)}
+            onBlur={() => void createProject()}
+            onKeyDown={e => {
+              if (e.key === "Enter") { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); }
+              if (e.key === "Escape") { setCreatingProject(false); setDraftProject(""); }
+            }} />
+        )}
+      </div>
       <div className="section-label conv-head">
-        <span>会话</span>
+        <span>会话{projectFilter !== "all" ? ` · ${typeof projectFilter === "number" ? projectName(projectFilter) : "未分组"}` : ""}</span>
         <button type="button" className={`conv-select-toggle ${selectMode ? "on" : ""}`} onClick={toggleSelectMode}>
           {selectMode ? "退出多选" : "多选"}
         </button>
@@ -634,7 +767,7 @@ export default function App() {
         <div className="topbar-title">{activeConv?.title ?? "主界面"}</div>
         <div className="topbar-meta">
           <span className="meta-item">模型 <b>DeepSeek</b></span>
-          <span className="meta-item">v0.3.2</span>
+          <span className="meta-item">v0.4.0</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
@@ -663,10 +796,11 @@ export default function App() {
               <div className="welcome-mark">◉</div>
               <h2>从一个想法开始</h2>
               <p>输入一句话，Agent 会<b>联网搜索</b>最新信息、<b>生成文档</b>（Word / PDF / Markdown），
-              或打开<b>任务模式</b>把目标拆解为多步计划执行。</p>
+              或打开<b>任务模式</b>把目标拆解为多步计划执行。<br />
+              它还会随着交流逐渐<b>记住你的偏好</b>——在“设置 → 记忆”中随时查看与管理。</p>
               <div className="panel">
                 <div className="panel-cell"><span>模型</span><b>DeepSeek</b></div>
-                <div className="panel-cell"><span>工具</span><b>搜索 · 文档 · 任务</b></div>
+                <div className="panel-cell"><span>工具</span><b>搜索 · 文档 · 任务 · 记忆</b></div>
                 <div className="panel-cell"><span>状态</span><b>就绪</b></div>
               </div>
             </div>

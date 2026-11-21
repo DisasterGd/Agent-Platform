@@ -365,6 +365,57 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
 .task-cancel-btn{border:1px solid var(--line);border-radius:3px;background:transparent;color:var(--ink-faint);font-size:12px;padding:6px 12px}
 .task-cancel-btn:hover{color:var(--ink);border-color:var(--line-strong)}
 
+/* ===== v0.4 项目栏 ===== */
+.proj-head{margin-top:16px}
+.proj-add{border:1px dashed var(--line-strong);border-radius:3px;background:transparent;color:var(--ink-faint);font-size:11px;line-height:1;padding:3px 8px}
+.proj-add:hover{color:var(--ink);border-color:var(--ink-faint)}
+.proj-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 2px 6px;flex:none}
+.proj-chip-wrap{position:relative;display:inline-flex}
+.proj-chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--ink-soft);font-size:11px;padding:4px 10px;max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.proj-chip:hover{color:var(--ink);border-color:var(--line-strong)}
+.proj-chip.on{color:var(--signal);border-color:var(--signal);background:rgba(198,60,44,.06)}
+.proj-chip-wrap.on .proj-chip{color:var(--signal);border-color:var(--signal);background:rgba(198,60,44,.06)}
+.proj-chip-more{opacity:0;font-size:12px;padding:0 2px;cursor:pointer}
+.proj-chip-wrap:hover .proj-chip-more{opacity:1}
+.proj-chip-input{width:120px;border:1px solid var(--signal);border-radius:999px;background:var(--paper-raised);color:var(--ink);font-size:11px;padding:4px 10px;outline:0}
+.proj-menu{top:24px;right:auto;left:0}
+
+/* ===== v0.4 设置：选项卡与记忆面板 ===== */
+.modal-tabs{display:flex;gap:0;border-bottom:1px solid var(--line);flex:none}
+.modal-tabs button{border:0;border-bottom:2px solid transparent;background:transparent;color:var(--ink-faint);font-size:13px;padding:10px 16px;margin-bottom:-1px}
+.modal-tabs button:hover{color:var(--ink)}
+.modal-tabs button.on{color:var(--signal);border-bottom-color:var(--signal);font-weight:600}
+.mem-panel{display:flex;flex-direction:column;gap:12px}
+.mem-switch{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-soft);cursor:pointer}
+.mem-switch input{accent-color:var(--signal)}
+.mem-chips{display:flex;flex-wrap:wrap;gap:6px}
+.mem-chip{border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--ink-soft);font-size:11px;padding:4px 12px}
+.mem-chip:hover{color:var(--ink);border-color:var(--line-strong)}
+.mem-chip.on{color:var(--signal);border-color:var(--signal);background:rgba(198,60,44,.06)}
+.mem-add{display:flex;flex-direction:column;gap:6px;padding:10px;border:1px dashed var(--line-strong);border-radius:4px}
+.mem-add input{border:1px solid var(--line);border-radius:3px;background:var(--paper);color:var(--ink);font-size:12px;padding:6px 9px;outline:0}
+.mem-add textarea{border:1px solid var(--line);border-radius:3px;background:var(--paper);color:var(--ink);font-size:12px;padding:6px 9px;outline:0;resize:vertical;font-family:inherit}
+.mem-add-btn{align-self:flex-end;border:1px solid var(--signal);border-radius:3px;background:transparent;color:var(--signal);font-size:11px;padding:5px 14px}
+.mem-add-btn:hover:not(:disabled){background:var(--signal);color:#fff}
+.mem-group h4{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:12px;color:var(--ink-soft)}
+.mem-group h4 em{font-style:normal;font-family:var(--mono);font-size:10px;color:var(--ink-faint);background:var(--paper-deep);border-radius:2px;padding:1px 6px}
+.mem-item{border:1px solid var(--line);border-radius:4px;background:var(--paper-raised);padding:8px 10px;margin-bottom:6px}
+.mem-item.off{opacity:.45}
+.mem-item-head{display:flex;align-items:center;gap:8px;min-width:0}
+.mem-item-head b{font-size:12px;color:var(--ink);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mem-src{flex:none;font-family:var(--mono);font-size:9px;color:var(--ink-faint);background:var(--paper-deep);border-radius:2px;padding:2px 6px}
+.mem-src.s-explicit{color:var(--signal);background:rgba(198,60,44,.08)}
+.mem-act{display:flex;gap:4px;flex:none}
+.mem-act button{border:0;background:transparent;color:var(--ink-faint);font-size:10px;padding:3px 5px;border-radius:3px}
+.mem-act button:hover{color:var(--ink);background:var(--paper-deep)}
+.mem-act button.danger:hover{color:var(--signal-deep)}
+.mem-item-content{margin:6px 0 0;font-size:12px;line-height:1.6;color:var(--ink-soft);white-space:pre-wrap;word-break:break-word}
+.mem-edit textarea{width:100%;margin-top:6px;border:1px solid var(--signal);border-radius:3px;background:var(--paper);color:var(--ink);font-size:12px;padding:7px 9px;outline:0;resize:vertical;font-family:inherit}
+.mem-edit-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:6px}
+.mem-edit-actions button{border:1px solid var(--line);border-radius:3px;background:transparent;color:var(--ink-soft);font-size:11px;padding:4px 12px}
+.mem-edit-actions button.primary{border-color:var(--signal);color:#fff;background:var(--signal)}
+.mem-empty{margin:6px 0 0;font-size:12px;color:var(--ink-faint);line-height:1.7}
+
 /* 问题索引仅在宽屏显示，避免与阅读列重叠 */
 @media(max-width:1200px){
   .index{display:none}
