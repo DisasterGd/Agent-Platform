@@ -15,6 +15,7 @@ from typing import Any
 
 from agent_platform.config import settings
 from agent_platform.core.agent import Agent
+from agent_platform.core.context import MEMORY_HEADER
 from agent_platform.core.events import (
     Event,
     step_completed,
@@ -57,23 +58,34 @@ class Runner:
         self.tools = tools
         self.outcomes: list[StepOutcome] = []
 
-    async def run(self, goal: str, steps: list[dict[str, Any]]) -> AsyncIterator[Event]:
+    async def run(
+        self, goal: str, steps: list[dict[str, Any]], memory_block: str = ""
+    ) -> AsyncIterator[Event]:
         """执行计划；产出 step_* / text_delta / tool_* / artifact_ready 事件流。
 
+        memory_block：注入执行器系统提示词的长期记忆文本（v0.4，可为空）。
         每步的 StepOutcome 累积在 self.outcomes，供服务层在事件流中读取并持久化/汇总。
         """
         self.outcomes = []
-        source = self._run_demo(goal, steps) if self.model is None else self._run_model(goal, steps)
+        if self.model is None:
+            source = self._run_demo(goal, steps)
+        else:
+            source = self._run_model(goal, steps, memory_block)
         async for event in source:
             yield event
 
-    async def _run_model(self, goal: str, steps: list[dict[str, Any]]) -> AsyncIterator[Event]:
+    async def _run_model(
+        self, goal: str, steps: list[dict[str, Any]], memory_block: str = ""
+    ) -> AsyncIterator[Event]:
+        system_prompt = EXECUTOR_SYSTEM_PROMPT
+        if memory_block:
+            system_prompt = f"{system_prompt}\n\n{MEMORY_HEADER}\n{memory_block}"
         for index, step in enumerate(steps):
             title = str(step.get("title") or f"步骤 {index + 1}")
             detail = str(step.get("detail") or title)
             yield step_started(index, title)
 
-            messages = [ChatMessage(role="system", content=EXECUTOR_SYSTEM_PROMPT)]
+            messages = [ChatMessage(role="system", content=system_prompt)]
             messages.append(ChatMessage(role="user", content=self._step_prompt(goal, steps, index, title, detail)))
 
             parts: list[str] = []

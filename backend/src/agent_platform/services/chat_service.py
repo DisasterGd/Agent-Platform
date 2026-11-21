@@ -7,7 +7,6 @@ from collections.abc import AsyncIterator
 from sqlalchemy.orm import Session
 
 from agent_platform.core.agent import Agent
-from agent_platform.core.context import build_context
 from agent_platform.core.events import (
     Event,
     error,
@@ -21,6 +20,7 @@ from agent_platform.infrastructure.attachments import (
     parse_file_url,
 )
 from agent_platform.infrastructure.database.models import Conversation
+from agent_platform.memory.manager import MemoryManager
 from agent_platform.models.base import ChatMessage, ImagePart
 from agent_platform.models.factory import create_model, create_vision_model
 from agent_platform.repositories.conversations import ConversationRepository
@@ -51,12 +51,16 @@ class ChatService:
         self.messages = MessageRepository(db)
         self.model = create_model()
         self.tools: ToolRegistry = build_default_registry()
+        # v0.4：会话压缩 + 长期记忆注入/提炼的统一入口
+        self.memory = MemoryManager(db, self.model)
 
-    def create_conversation(self, user_id: int, title: str = "新会话") -> Conversation:
-        return self.conversations.create(user_id, title)
+    def create_conversation(
+        self, user_id: int, title: str = "新会话", project_id: int | None = None
+    ) -> Conversation:
+        return self.conversations.create(user_id, title, project_id)
 
-    def list_conversations(self, user_id: int) -> list[Conversation]:
-        return self.conversations.list_by_user(user_id)
+    def list_conversations(self, user_id: int, project_id: object = ...) -> list[Conversation]:
+        return self.conversations.list_by_user(user_id, project_id=project_id)
 
     def get_conversation(self, conversation_id: int) -> Conversation | None:
         return self.conversations.get(conversation_id)
@@ -99,6 +103,10 @@ class ChatService:
         if target is None or target.conversation_id != conversation_id or target.role != "user":
             yield error("要重新生成的消息不存在或不是用户提问")
             return
+        conversation = self.conversations.get(conversation_id)
+        if conversation is None:
+            yield error("会话不存在")
+            return
         content = new_content.strip() if new_content is not None and new_content.strip() else target.content
         attachments = target.attachments or []
 
@@ -132,11 +140,16 @@ class ChatService:
         enriched = await self._enrich(content, attachments)
         self.conversations.touch(conversation_id)
 
-        # 上下文 = 此前各轮 + 本轮提问；丢弃待替换的旧回复，避免模型参照自己的旧答案
-        pairs = [(m.role, m.content) for m in active[:pos]]
-        pairs.append(("user", enriched))
+        # 上下文 = 此前各轮 + 本轮提问（合成一条未落库的最新 id 以免被摘要覆盖）；
+        # 丢弃待替换的旧回复，避免模型参照自己的旧答案；同样经过压缩与记忆注入
+        prior = [(m.id, m.role, m.content) for m in active[:pos]]
+        next_id = max((m.id for m in active), default=0) + 1
+        entries = prior + [(next_id, "user", enriched)]
+        context, ctx_events = await self.memory.build_messages(conversation, entries)
+        for event in ctx_events:
+            yield event
         async for event in self._stream_turn(
-            conversation_id, build_context(pairs), content, assistant_group_id=assistant_group
+            conversation, context, content, assistant_group_id=assistant_group
         ):
             yield event
 
@@ -212,6 +225,11 @@ class ChatService:
         content: str,
         attachments: list[dict] | None = None,
     ) -> AsyncIterator[Event]:
+        conversation = self.conversations.get(conversation_id)
+        if conversation is None:
+            yield error("会话不存在")
+            return
+
         yield task_started()
 
         attachments = attachments or []
@@ -223,18 +241,21 @@ class ChatService:
         # 新会话立刻有可读标题（截取提问），生成完成后再由模型精炼
         self.apply_provisional_title(conversation_id, content)
 
-        # 上下文取每个版本链的最新一条；最后一条为刚插入的用户消息，用附件正文/识图结果增强
+        # 上下文 = 每个版本链最新一条（末条用附件/识图增强），经 MemoryManager：超长先压缩、再注入记忆
         history = self.messages.list_active_by_conversation(conversation_id)
-        pairs = [(m.role, m.content) for m in history]
-        if pairs and pairs[-1][0] == "user":
-            pairs[-1] = ("user", enriched)
+        entries = [(m.id, m.role, m.content) for m in history]
+        if entries and entries[-1][1] == "user":
+            entries[-1] = (entries[-1][0], "user", enriched)
+        context, ctx_events = await self.memory.build_messages(conversation, entries)
+        for event in ctx_events:
+            yield event
 
-        async for event in self._stream_turn(conversation_id, build_context(pairs), content):
+        async for event in self._stream_turn(conversation, context, content):
             yield event
 
     async def _stream_turn(
         self,
-        conversation_id: int,
+        conversation: Conversation,
         chat_messages: list[ChatMessage],
         user_content: str,
         assistant_group_id: int | None = None,
@@ -244,6 +265,7 @@ class ChatService:
         中断兜底：模型报错或客户端切走导致流终止时，已生成的部分（含中断说明）也会落库，
         避免“生成到一半的内容凭空消失”。
         """
+        conversation_id = conversation.id
         parts: list[str] = []
         persisted = False
 
@@ -289,6 +311,14 @@ class ChatService:
 
         _persist()
         await self.ensure_title(conversation_id, user_content)
+        # v0.4：轮末记忆提炼（含用户显式“记住”请求）；提炼失败不阻断主流程
+        try:
+            reply = "".join(parts).strip()
+            memory_events = await self.memory.after_turn(conversation, user_content, reply)
+        except Exception:  # noqa: BLE001
+            memory_events = []
+        for mem_event in memory_events:
+            yield mem_event
         yield task_completed()
 
     async def _demo_stream(self, user_text: str) -> AsyncIterator[str]:

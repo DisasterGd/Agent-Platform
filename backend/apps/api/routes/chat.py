@@ -20,12 +20,14 @@ class ConversationOut(BaseModel):
     id: int
     title: str
     pinned: bool
+    project_id: int | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class CreateConversationIn(BaseModel):
     title: str = "新会话"
+    project_id: int | None = None  # v0.4：归属项目（None = 未分组）
 
 
 class UpdateConversationIn(BaseModel):
@@ -65,10 +67,16 @@ class RegenerateIn(BaseModel):
 
 @router.get("/conversations", response_model=list[ConversationOut])
 def list_conversations(
+    project_id: str | None = None,
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    return ChatService(db).list_conversations(user_id)
+    # project_id 省略=全部；"none"=未分组；数字=指定项目
+    if project_id is None:
+        return ChatService(db).list_conversations(user_id)
+    if project_id == "none":
+        return ChatService(db).list_conversations(user_id, project_id=None)
+    return ChatService(db).list_conversations(user_id, project_id=int(project_id))
 
 
 @router.post("/conversations", response_model=ConversationOut, status_code=201)
@@ -77,7 +85,7 @@ def create_conversation(
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    return ChatService(db).create_conversation(user_id, body.title)
+    return ChatService(db).create_conversation(user_id, body.title, body.project_id)
 
 
 @router.patch("/conversations/{conversation_id}", response_model=ConversationOut)

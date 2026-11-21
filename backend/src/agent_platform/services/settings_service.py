@@ -74,10 +74,17 @@ class SettingsService:
         for key in CONFIG_FIELDS:
             if key in saved:
                 config[key] = saved[key]
+        # v0.4：自动记忆开关（默认跟随 .env 的全局配置）
+        config["memory_enabled"] = bool(saved.get("memory_enabled", settings.memory_enabled))
         return config
 
     def save(self, payload: dict) -> dict:
         config = {key: str(payload.get(key) or "").strip() for key in CONFIG_FIELDS}
+        memory_enabled = payload.get("memory_enabled")
+        if memory_enabled is None:
+            # 未显式提交时保持已保存的开关，避免“模型页保存”把记忆设置重置
+            memory_enabled = self.load().get("memory_enabled", settings.memory_enabled)
+        config["memory_enabled"] = bool(memory_enabled)
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")

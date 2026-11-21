@@ -15,6 +15,7 @@ class SettingsIn(BaseModel):
     api_key: str = ""
     model: str = ""
     vision_model: str = ""
+    memory_enabled: bool | None = None  # v0.4 自动记忆开关（None=保持当前值）
 
 
 @router.get("/settings")

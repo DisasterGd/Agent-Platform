@@ -18,6 +18,7 @@ from agent_platform.core.events import Event, error, plan_created, task_complete
 from agent_platform.core.planner import Planner
 from agent_platform.core.runner import Runner
 from agent_platform.infrastructure.database.models import Conversation, Task
+from agent_platform.memory.manager import MemoryManager
 from agent_platform.models.base import ChatMessage
 from agent_platform.models.factory import create_model
 from agent_platform.repositories.conversations import ConversationRepository
@@ -46,7 +47,10 @@ class TaskService:
         self, user_id: int, goal: str, conversation_id: int | None = None
     ) -> Task:
         goal = goal.strip()
-        task = self.tasks.create(user_id, goal, conversation_id)
+        # 任务继承所属会话的项目（v0.4 项目记忆按此检索注入）
+        conversation = self.conversations.get(conversation_id) if conversation_id else None
+        project_id = conversation.project_id if conversation else None
+        task = self.tasks.create(user_id, goal, conversation_id, project_id)
         steps = await self.planner.plan(goal)
         self.tasks.replace_steps(task.id, [{"title": s.title, "detail": s.detail} for s in steps])
         return self.tasks.get(task.id) or task
@@ -108,9 +112,11 @@ class TaskService:
         self.conversations.touch(conversation.id)
         yield plan_created(steps, conversation.id)
 
+        # v0.4：任务执行器同样注入全局/项目记忆
+        memory_block = MemoryManager(self.db, self.model).memory_block(task.user_id, task.project_id)
         runner = Runner(self.model, tools=self.tools)
         try:
-            async for event in runner.run(task.goal, steps):
+            async for event in runner.run(task.goal, steps, memory_block):
                 # 取消检查：任何时刻把状态改为 cancelled 都会在下一个事件生效
                 if self._is_cancelled(task_id):
                     yield task_completed({"status": "cancelled", "summary": "", "conversation_id": conversation.id})
