@@ -5,12 +5,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from agent_platform.config import settings
-from apps.api.routes import auth, chat, files, groups, health, knowledge, search, tasks
+from apps.api.routes import (
+    auth,
+    chat,
+    files,
+    groups,
+    health,
+    knowledge,
+    library,
+    search,
+    tasks,
+)
 from apps.api.routes import memories as memories_route
 from apps.api.routes import projects as projects_route
 from apps.api.routes import settings as settings_route
 
-app = FastAPI(title=settings.app_name, version="0.4.6")
+app = FastAPI(title=settings.app_name, version="0.5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,6 +37,7 @@ app.include_router(auth.router, prefix=settings.api_v1_prefix)
 app.include_router(tasks.router, prefix=settings.api_v1_prefix)
 app.include_router(knowledge.router, prefix=settings.api_v1_prefix)
 app.include_router(files.router, prefix=settings.api_v1_prefix)
+app.include_router(library.router, prefix=settings.api_v1_prefix)
 app.include_router(projects_route.router, prefix=settings.api_v1_prefix)
 app.include_router(memories_route.router, prefix=settings.api_v1_prefix)
 app.include_router(groups.router, prefix=settings.api_v1_prefix)

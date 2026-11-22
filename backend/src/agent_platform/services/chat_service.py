@@ -27,6 +27,7 @@ from agent_platform.repositories.conversations import ConversationRepository
 from agent_platform.repositories.groups import GroupRepository
 from agent_platform.repositories.messages import MessageRepository
 from agent_platform.repositories.projects import ProjectRepository
+from agent_platform.services.library_service import LibraryService
 from agent_platform.tools.builtin.registry import build_default_registry
 from agent_platform.tools.registry import ToolRegistry
 
@@ -61,6 +62,8 @@ class ChatService:
         self.tools: ToolRegistry = build_default_registry()
         # v0.4：会话压缩 + 长期记忆注入/提炼的统一入口
         self.memory = MemoryManager(db, self.model)
+        # v0.5：生成文件登记进资料库（工具只产出 artifact 事件，落库在这里）
+        self.library = LibraryService(db)
 
     def create_conversation(
         self, user_id: int, title: str = "新会话", project_id: int | None = None
@@ -245,6 +248,35 @@ class ChatService:
                     parts.append(f"\n\n[附件 {name}]\n{text}")
         return "\n".join(parts)
 
+    def _register_asset(self, conversation: Conversation, artifact: dict) -> None:
+        """v0.5：把工具产出的文件登记进资料库（带会话/项目归属）。
+
+        登记失败绝不能打断回复流，所以整段吞掉异常：文件已经落盘，用户仍可在消息里下载。
+        """
+        try:
+            self.library.register_artifact(
+                artifact,
+                user_id=conversation.user_id,
+                source="chat",
+                project_id=conversation.project_id,
+                conversation_id=conversation.id,
+            )
+        except Exception:  # noqa: BLE001,S110 — 资料库登记失败不影响聊天主流程
+            pass
+
+    def _link_attachments(self, conversation: Conversation, attachments: list[dict]) -> None:
+        """v0.5：上传附件在“发送这一刻”才确定归属，补写会话与项目。"""
+        if not attachments:
+            return
+        try:
+            self.library.link_attachments(
+                attachments,
+                conversation_id=conversation.id,
+                project_id=conversation.project_id,
+            )
+        except Exception:  # noqa: BLE001,S110 — 同上，登记失败不阻断发送
+            pass
+
     async def stream_reply(
         self,
         conversation_id: int,
@@ -263,6 +295,7 @@ class ChatService:
 
         # 落库保存原始内容 + 附件元数据，供前端展示与刷新后回显
         self.messages.add(conversation_id, "user", content, attachments=attachments)
+        self._link_attachments(conversation, attachments)
         self.conversations.touch(conversation_id)
         # 新会话立刻有可读标题（截取提问），生成完成后再由模型精炼
         self.apply_provisional_title(conversation_id, content)
@@ -321,6 +354,8 @@ class ChatService:
                 async for event in agent.stream(chat_messages):
                     if event.type == "text_delta":
                         parts.append(event.data.get("content", ""))
+                    elif event.type == "artifact_ready":
+                        self._register_asset(conversation, event.data)
                     yield event
             else:
                 async for token in self._demo_stream(user_content):

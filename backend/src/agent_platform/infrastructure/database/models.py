@@ -9,6 +9,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -57,6 +58,37 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(200), default="未命名项目")
     description: Mapped[str] = mapped_column(Text, default="")
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+class FileAsset(Base):
+    """v0.5 资料库条目：磁盘上每个上传/生成文件在库里的唯一记录。
+
+    category: uploads（用户上传）/ generated（Agent 产出）
+    kind: 见 infrastructure/filetypes（code/document/image/archive/audio/video/other），
+          资料库页签与筛选按它归类，落库避免每次重新猜。
+    source: upload（聊天附件）/ chat（聊天中生成）/ task（任务步骤生成）/ library（存量扫描登记）
+    stored_name = 磁盘真实文件名；重命名只改 filename，因此历史消息里的旧下载链接一直有效。
+    conversation_id 不建外键：删除会话不应连带删除用户资料库里的文件。
+    """
+    __tablename__ = "file_assets"
+    __table_args__ = (
+        Index("ix_file_assets_user_created", "user_id", "created_at"),
+        Index("ix_file_assets_project_created", "project_id", "created_at"),
+        UniqueConstraint("category", "stored_name", name="uq_file_assets_category_stored"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    conversation_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    category: Mapped[str] = mapped_column(String(16), default="generated", server_default="generated")
+    stored_name: Mapped[str] = mapped_column(String(255))
+    filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(128), default="", server_default="")
+    kind: Mapped[str] = mapped_column(String(16), default="other", server_default="other")
+    source: Mapped[str] = mapped_column(String(16), default="upload", server_default="upload")
+    tool: Mapped[str] = mapped_column(String(32), default="", server_default="")
+    size: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 

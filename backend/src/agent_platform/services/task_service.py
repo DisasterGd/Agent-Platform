@@ -136,6 +136,8 @@ class TaskService:
                 if self._is_cancelled(task_id):
                     yield task_completed({"status": "cancelled", "summary": "", "conversation_id": conversation.id})
                     return
+                if event.type == "artifact_ready":
+                    self._register_asset(task, conversation, event.data)
                 self._persist_step_event(task_id, event)
                 yield event
                 if event.type == "step_failed":
@@ -171,6 +173,19 @@ class TaskService:
             )
         elif event.type == "step_failed":
             self.tasks.update_step(task_id, event.data["index"], "failed", error=event.data.get("error", ""))
+
+    def _register_asset(self, task: Task, conversation: Conversation, artifact: dict) -> None:
+        """v0.5：任务步骤产出的文件登记进资料库（归属优先取任务的项目）。"""
+        try:
+            self.chat.library.register_artifact(
+                artifact,
+                user_id=task.user_id,
+                source="task",
+                project_id=task.project_id or conversation.project_id,
+                conversation_id=conversation.id,
+            )
+        except Exception:  # noqa: BLE001,S110 — 登记失败不打断任务执行
+            pass
 
     async def _compose_summary(self, goal: str, outcomes: list) -> str:
         """程序汇总：优先让模型整合；无模型或失败时按步骤拼接。"""
