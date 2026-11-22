@@ -11,6 +11,8 @@ from agent_platform.infrastructure.database.models import ConversationGroup
 from agent_platform.repositories.conversations import ConversationRepository
 from agent_platform.repositories.groups import GroupRepository
 
+GROUP_KINDS = ("group", "task")
+
 
 class GroupService:
     def __init__(self, db: Session) -> None:
@@ -18,8 +20,10 @@ class GroupService:
         self.groups = GroupRepository(db)
         self.conversations = ConversationRepository(db)
 
-    def create(self, user_id: int, name: str) -> ConversationGroup:
-        return self.groups.create(user_id, name.strip() or "未命名分组")
+    def create(self, user_id: int, name: str, kind: str = "group") -> ConversationGroup:
+        if kind not in GROUP_KINDS:
+            raise ValueError("分组类型不合法")
+        return self.groups.create(user_id, name.strip() or "未命名分组", kind)
 
     def list(self, user_id: int) -> list[ConversationGroup]:
         return self.groups.list_by_user(user_id)

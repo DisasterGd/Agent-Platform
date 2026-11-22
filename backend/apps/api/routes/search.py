@@ -58,6 +58,7 @@ class GroupHit(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
+    kind: str = "group"
     created_at: datetime
     updated_at: datetime
 

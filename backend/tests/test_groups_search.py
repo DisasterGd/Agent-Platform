@@ -42,10 +42,24 @@ def test_group_crud_and_membership(db_user: tuple[Session, int]) -> None:
 
     g = groups.create(uid, "阅读笔记")
     assert [x.id for x in groups.list(uid)] == [g.id]
+    assert g.kind == "group"
+
+    task_group = groups.create(uid, "长线调研", kind="task")
+    assert task_group.kind == "task"
+    with pytest.raises(ValueError):
+        groups.create(uid, "坏分组", kind="nonsense")
 
     c = chat.create_conversation(uid, "读书交流")
     chat.update_conversation(c.id, group_id=g.id)
     assert convs.get(c.id).group_id == g.id
+
+    # 移入分组同时移出项目：后端保持中性——由调用方显式传 project_id=null（前端移动规则如此）
+    p = ProjectService(db).create(uid, "工作")
+    chat.update_conversation(c.id, project_id=p.id)
+    assert convs.get(c.id).project_id == p.id
+    chat.update_conversation(c.id, project_id=None, group_id=task_group.id)
+    row = convs.get(c.id)
+    assert row.project_id is None and row.group_id == task_group.id
 
     # 移出分组
     chat.update_conversation(c.id, group_id=None)
@@ -55,10 +69,14 @@ def test_group_crud_and_membership(db_user: tuple[Session, int]) -> None:
     groups.update(g.id, uid, name="读书笔记")
     assert groups.get(g.id, uid).name == "读书笔记"
 
-    # 删除分组：会话退回默认归类
-    chat.update_conversation(c.id, group_id=g.id)
-    assert groups.delete(g.id, uid) is True
-    assert convs.get(c.id).group_id is None
+    # 删除分组：会话退回默认归类（任务会话应回“任务”）
+    task_conv = chat.create_conversation(uid, "任务会话")
+    TaskRepository(db).create(uid, "做点事", conversation_id=task_conv.id)
+    chat.update_conversation(task_conv.id, group_id=task_group.id)
+    assert {x.id: x.kind for x in convs.list_by_user(uid)}[task_conv.id] == "task"
+    assert convs.get(task_conv.id).group_id == task_group.id
+    assert groups.delete(task_group.id, uid) is True
+    assert convs.get(task_conv.id).group_id is None
 
 
 def test_move_project_sentiment(db_user: tuple[Session, int]) -> None:

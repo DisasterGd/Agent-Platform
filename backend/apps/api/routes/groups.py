@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from agent_platform.services.group_service import GroupService
+from agent_platform.services.group_service import GROUP_KINDS, GroupService
 from apps.api.dependencies import get_current_user_id, get_db
 
 router = APIRouter(tags=["groups"])
@@ -22,12 +22,15 @@ class GroupOut(BaseModel):
     id: int
     user_id: int
     name: str
+    # group=根级自定义分组；task=“任务”分区下的子分组（仅任务会话可归入）
+    kind: str = "group"
     created_at: datetime
     updated_at: datetime
 
 
 class CreateGroupIn(BaseModel):
     name: str
+    kind: str = "group"
 
 
 class UpdateGroupIn(BaseModel):
@@ -50,7 +53,12 @@ def create_group(
 ):
     if not body.name.strip():
         raise HTTPException(status_code=400, detail="分组名称不能为空")
-    return GroupService(db).create(user_id, body.name)
+    if body.kind not in GROUP_KINDS:
+        raise HTTPException(status_code=400, detail="分组类型不合法")
+    try:
+        return GroupService(db).create(user_id, body.name, body.kind)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.patch("/groups/{group_id}", response_model=GroupOut)

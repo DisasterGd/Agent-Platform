@@ -61,12 +61,17 @@ class Project(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 class ConversationGroup(Base):
-    """v0.4.1 用户自定义分组：仅存自定义分组，默认分组（项目/任务/未分组）由代码归类。"""
+    """v0.4.1 用户自定义分组：仅存自定义分组，默认分组（项目/任务/未分组）由代码归类。
+
+    kind: group=根级自定义分组（普通会话可归入）；task=“任务”分区下的子分组
+    （仅任务模式会话可归入，任务会话与普通会话不可混用）。
+    """
     __tablename__ = "conv_groups"
     __table_args__ = (Index("ix_conv_groups_user_updated", "user_id", "updated_at"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(200), default="未命名分组")
+    kind: Mapped[str] = mapped_column(String(16), default="group", server_default="group")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 

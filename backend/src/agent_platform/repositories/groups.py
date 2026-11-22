@@ -11,8 +11,8 @@ class GroupRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def create(self, user_id: int, name: str) -> ConversationGroup:
-        group = ConversationGroup(user_id=user_id, name=name[:200] or "未命名分组")
+    def create(self, user_id: int, name: str, kind: str = "group") -> ConversationGroup:
+        group = ConversationGroup(user_id=user_id, name=name[:200] or "未命名分组", kind=kind)
         self.db.add(group)
         self.db.commit()
         self.db.refresh(group)
