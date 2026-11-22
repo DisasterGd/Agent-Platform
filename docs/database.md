@@ -1,4 +1,4 @@
-# 数据库说明 v0.4.6
+# 数据库说明 v0.5.0
 
 - `users`：用户主体；当前仅创建本地开发用户（`DEV_USER_ID`）。
 - `projects`：v0.4 项目，会话与项目记忆的归属分组（`name` / `description` / `pinned`）。
@@ -9,6 +9,13 @@
   `kind`（chat/task）不占列，由任务表派生（存在绑定该会话的任务即为 task，列表用 selectinload 避免 N+1）。
 - `messages`：会话消息（`group_id` + `variant_index` 版本链，重新生成保留历史版本）。
 - `tasks` / `task_steps`：v0.3 任务与计划步骤（状态机 awaiting_approval/running/completed/failed/cancelled）。
+- `file_assets`：v0.5 资料库条目 —— 磁盘上每个上传/生成文件在库里的唯一记录（**一行 = 一个文件**）。
+  `category`=uploads/generated（对应 `data/uploads`、`data/generated`），`stored_name` 为磁盘真实名，
+  `filename` 为可重命名的显示名（重命名不动磁盘名，因此历史消息里的下载链接继续有效）；
+  `kind`=code/document/image/audio/video/archive/other（由 `infrastructure/filetypes` 判定后落库，避免每次重新猜）；
+  `source`=upload/chat/task/library（存量扫描登记）；`project_id` / `conversation_id` 承载项目联动与来源跳转，
+  其中 `conversation_id` **不建外键**——删除会话不应连带删除用户资料库里的文件；
+  `(category, stored_name)` 唯一，使“上传登记 / 生成登记 / 存量扫描”三条入口可重复调用（幂等）。
 - `memories`：v0.4 长期记忆（**系统级真记忆**：存库、可 CRUD、按作用域注入）。
   `scope`=global/project，`project_id` 仅 project 作用域使用；
   `category` 由模型归类（用户信息/用户偏好/项目/领域知识/其他）；
@@ -19,7 +26,7 @@
 - Engine：数据库连接池入口。
 - Session：工作单元，跟踪对象并提交事务。
 - Repository：封装查询与写入。
-- Alembic：数据库结构版本管理（当前迁移链 0001–0008）。
+- Alembic：数据库结构版本管理（当前迁移链 0001–0009）。
 
 迁移命令（backend 目录）：
 ```powershell

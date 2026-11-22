@@ -1,4 +1,4 @@
-# Agent Platform v0.4.6
+# Agent Platform v0.5.0
 
 本地优先的智能 Agent 平台：React + TypeScript + Vite、FastAPI、MySQL、SQLAlchemy 2.x、Alembic、SSE，默认接入 DeepSeek（OpenAI 兼容接口）。
 
@@ -124,6 +124,26 @@
   不再依赖悬停看全文（原生 tooltip 也无法渲染 Markdown）
 - 原生 UI 盘点结论：`confirm/alert/prompt` 早已被应用内 `ConfirmDialog` 取代（零残留）；滚动条与选中文本色自 v0.1 即自定义；
   文件选择、外链新窗口、下载保存属**操作系统级功能入口**（Electron 迁移时同样经系统 API，届时统一拦截策略），保留现状
+
+**v0.5（文件类型扩展与资料库）**
+
+- **类型词典统一到一处**（`infrastructure/filetypes`）：上百种后缀 + MIME 判定，上传正文提取、生成文件白名单、
+  资料库分类三处共用，不再各写一份清单
+- **上传几乎不再限类型**：代码（.py/.ts/.tsx/.go/.rs/.java/.vue/.sql…）、配置（.yaml/.toml/.ini/.env）、
+  标记（.md/.rst/.tex）、数据（.csv/.jsonl）、无后缀常见名（Dockerfile/Makefile/LICENSE）都能被模型读正文；
+  后缀不在清单里的文件再用**内容嗅探**兜底（有 NUL 字节即判二进制），PDF/DOCX 继续走专用解析并限长截断
+- **新工具 `write_file`**：文件名与后缀由模型给出并原样写出（内容不做任何 Markdown 渲染）——
+  `src/app/main.py`、`docker-compose.yml`、`index.html` 这类“文件名即用途”的交付物；
+  服务端校验后缀白名单、清洗非法字符、拒绝绝对路径与 `..`，二进制拒绝
+- **新工具 `create_zip`**：把多个文件打成 zip 供下载，可内联内容（`files`）也可引用本轮已生成的文件
+  （`from_files`，无需重复输出内容）；限制条目数与总体积，包内路径同样拒绝上跳
+- **侧栏新增「资料库」**（收起态图标条同样保留入口）：查看上传过与 AI 生成的全部文件，
+  按类型页签（代码/文档/图像/压缩包/音频/视频/其他）、来源（我上传的 / Agent 生成）、项目、文件名搜索筛选，
+  支持**重命名、下载、删除、移到项目/移出项目、跳回来源会话**；「按项目」视图即文件夹式分组
+- **文件预览**：文本/代码原样显示（.md 走 Markdown 富渲染）、图像直接看、音视频就地播放、
+  zip 显示包内目录树与逐项大小、其余类型提示下载；文件被外部删除时卡片标注并提示
+- **数据层**：新增 `file_assets` 表（迁移 `0009`），一行对应磁盘一个文件；重命名只改显示名、不动磁盘名，
+  因此历史消息里的下载链接永不失效；生成文件自动继承会话/项目归属，存量文件在首次打开资料库时扫描登记
 
 当前开发用户 ID 仅用于本地单用户开发，不是身份认证；公网部署前必须实现真实认证和服务端权限校验。
 
@@ -253,21 +273,21 @@ SEARCH_PROVIDER=tavily       # Tavily（面向 LLM 的搜索 API，需 SEARCH_AP
 
 ```text
 backend/
-  apps/api/                  FastAPI 入口与路由（chat / tasks / projects / groups / search / memories / files / settings / auth / health）
+  apps/api/                  FastAPI 入口与路由（chat / tasks / projects / groups / search / memories / files / library / settings / auth / health）
   src/agent_platform/        核心库
     core/                    agent.py 工具循环 · planner.py 任务规划 · runner.py 任务执行 · events.py 事件词汇表 · context.py 上下文(摘要+记忆注入)
     memory/                  v0.4 三级记忆：manager 门面 · conversation 历史压缩 · long_term 提炼/归类/注入
     models/                  大模型适配层（供应商登记表）
-    tools/                   工具注册表 + 内置工具（web_search / fetch_url / generate_file）
-    services/                业务用例层（chat_service · task_service · project_service · group_service · search_service · memory_service · settings_service）
-    repositories/            数据访问层（conversations · messages(版本链) · tasks · projects · groups · memories）
-    infrastructure/          database / storage(可读命名+去重) / search / generation / attachments
-  migrations/                Alembic 迁移（0001–0007）
+    tools/                   工具注册表 + 内置工具（web_search / fetch_url / generate_file / write_file / create_zip）
+    services/                业务用例层（chat_service · task_service · project_service · group_service · search_service · memory_service · settings_service · library_service）
+    repositories/            数据访问层（conversations · messages(版本链) · tasks · projects · groups · memories · file_assets）
+    infrastructure/          database / storage(可读命名+去重·删除·列目录) / search / generation(md·docx·pdf · 文本文件·zip) / attachments / filetypes(类型词典)
+  migrations/                Alembic 迁移（0001–0009）
   pyproject.toml             后端依赖（pip install -e ".[dev]"）
 frontend/
   src/
-    components/              Sidebar 侧栏（动作区+分组分区） · SearchModal 搜索弹窗 · ProjectsModal 项目弹窗 · TaskWorkspace 任务界面 · TaskCard 任务卡 · Markdown 富渲染 · ThinkingTicker 思考面板 · MemoryPanel 记忆管理 · ConfirmDialog 确认弹窗 · SettingsModal
-    services/                api / chat(SSE) / tasks / projects / groups / search / memories / settings
+    components/              Sidebar 侧栏（动作区+分组分区） · SearchModal 搜索弹窗 · ProjectsModal 项目弹窗 · LibraryModal 资料库弹窗（类型页签/项目分组/重命名·删除·预览） · TaskWorkspace 任务界面 · TaskCard 任务卡 · Markdown 富渲染 · ThinkingTicker 思考面板 · MemoryPanel 记忆管理 · ConfirmDialog 确认弹窗 · SettingsModal
+    services/                api / chat(SSE) / tasks / projects / groups / search / memories / settings / library
     styles/                  设计令牌（浅色/深色）
     types/                   类型定义
 scripts/                     check_db.py / init_db.py
@@ -284,8 +304,8 @@ data/                        上传与生成的文件、settings.json（gitignor
 | v0.2 | 工具调用 | 让模型能够使用外部工具 | ✅ |
 | v0.3 | 任务规划与执行 | 支持多步骤任务 | ✅ |
 | v0.4 | 记忆系统 | 保存和检索长期记忆 | ✅ |
-| v0.5 | 知识库 | 支持文档上传、切块和检索 | 下一步 |
-| v0.6 | 多模型管理 | 支持不同模型切换 | |
+| v0.5 | 知识库 | 支持文档上传、切块和检索 | 🔨 当前（上传类型扩展、代码/压缩包生成、资料库已完成；切块与检索待做） |
+| v0.6 | 多模型管理 | 支持不同模型切换 | 下一步 |
 | v0.7 | 账号体系 | 注册、登录、权限管理 | |
 | v0.8 | 云端部署 | 多用户在线服务 | |
 | v0.9 | 桌面启动器 | Windows 双击启动与云端连接 | |
@@ -302,4 +322,7 @@ data/                        上传与生成的文件、settings.json（gitignor
 - 任务执行开始（生成阶段）即绑定会话并写入目标消息，完成或失败都写回结果；删除会话会级联删除其任务与步骤。
 - 记忆持久化≠作用域：memories 按 scope（global/project）检索注入；会话摘要只是临时记忆，随会话删除；删除项目只清其项目记忆，会话退回未分组。
 - 分组归类由代码完成（v0.4.1）：优先级 自定义分组 → 项目 → 任务（由任务表派生 kind）→ 未分组；默认分组不落库，自定义分组删除后会话退回默认归类；“添加至分组”菜单只列自定义分组。
+- 文件以磁盘为准，`file_assets` 只是索引（v0.5）：`stored_name` 不可变（重命名只改显示名，历史链接继续有效），
+  `(category, stored_name)` 唯一使三条登记入口幂等；类型判定统一走 `infrastructure/filetypes`；
+  工具层不碰数据库——生成文件由服务层在 `artifact_ready` 事件上登记，从而带上会话与项目归属。
 - 云端版本必须替换开发身份依赖，增加认证、权限、限流、HTTPS 和密钥管理。
