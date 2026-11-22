@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import json
 
+from agent_platform.infrastructure.filetypes import classify_kind
 from agent_platform.infrastructure.generation.documents import DocumentGenerator
 from agent_platform.infrastructure.storage.local import get_storage
 from agent_platform.tools.registry import ToolResult
 
 GENERATE_FILE_DESCRIPTION = (
-    "把内容导出成文件。当用户要求生成文档、报告、说明、总结等需要下载的文件时调用。"
+    "把 Markdown 内容导出成文档文件。当用户要求生成报告、说明、总结、方案等需要下载的文档时调用。"
     "format 支持 md（Markdown）、docx（Word）、pdf（PDF）。content 用 Markdown 编写。"
+    "生成代码、配置、网页等文件请用 write_file（原样写出，由你指定文件名与后缀）。"
 )
 GENERATE_FILE_PARAMETERS = {
     "type": "object",
@@ -36,6 +38,9 @@ def generate_file(format: str, title: str, content: str) -> ToolResult:
         "url": stored.url,
         "format": format,
         "content_type": content_type,
+        "category": stored.category,
+        "size": stored.size,
+        "kind": classify_kind(filename, content_type),
     }
     return ToolResult(
         content=json.dumps(

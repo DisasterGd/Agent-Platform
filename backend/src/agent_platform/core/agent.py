@@ -70,7 +70,8 @@ class Agent:
                     )
                 else:
                     for artifact in result.artifacts:
-                        yield artifact_ready(artifact)
+                        # 标记产出该文件的工具：服务层据此登记资料库条目（v0.5）
+                        yield artifact_ready({**artifact, "tool": call.name})
                     msgs.append(
                         ChatMessage(
                             role="tool",

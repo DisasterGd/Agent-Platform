@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent_platform.config import settings
+from agent_platform.infrastructure.filetypes import classify_kind, human_size
 
 # Windows 下文件名非法字符 + 控制符
 _INVALID_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
@@ -69,6 +70,11 @@ class StoredFile:
             "url": self.url,
             "content_type": self.content_type,
             "size": self.size,
+            "size_label": human_size(self.size),
+            # v0.5 资料库：登记与前端展示需要的三件事
+            "stored_name": self.stored_name,
+            "category": self.category,
+            "kind": classify_kind(self.filename, self.content_type),
         }
 
 
@@ -101,6 +107,49 @@ class LocalStorage:
             return None
         target = self._dir(category) / stored_name
         return target if target.is_file() else None
+
+    def remove(self, category: str, stored_name: str) -> bool:
+        """删除磁盘文件（资料库删除条目时调用）。文件不存在也视为成功（幂等）。"""
+        path = self.resolve(category, stored_name)
+        if path is None:
+            return False
+        try:
+            path.unlink()
+        except OSError:
+            return False
+        return True
+
+    def read_bytes(self, category: str, stored_name: str, limit: int | None = None) -> bytes | None:
+        path = self.resolve(category, stored_name)
+        if path is None:
+            return None
+        try:
+            if limit is None:
+                return path.read_bytes()
+            with path.open("rb") as fh:
+                return fh.read(limit)
+        except OSError:
+            return None
+
+    def iter_files(self, category: str) -> list[tuple[str, int]]:
+        """列目录：(文件名, 字节数)。供资料库首次登记存量文件使用。"""
+        directory = self._dir(category)
+        if not directory.is_dir():
+            return []
+        out: list[tuple[str, int]] = []
+        for entry in directory.iterdir():
+            if entry.is_file():
+                try:
+                    out.append((entry.name, entry.stat().st_size))
+                except OSError:
+                    continue
+        return out
+
+    def usage(self) -> dict[str, int]:
+        counts = {}
+        for category in ("uploads", "generated"):
+            counts[category] = sum(size for _, size in self.iter_files(category))
+        return counts
 
 
 _storage: LocalStorage | None = None
