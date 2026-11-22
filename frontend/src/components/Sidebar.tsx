@@ -16,6 +16,8 @@ interface Props {
   onNewChat: () => void;
   onOpenSearch: () => void;
   onOpenProjects: () => void;
+  /** v0.5 资料库：上传与生成的文件统一查看/管理 */
+  onOpenLibrary: () => void;
   onOpenConversation: (c: Conversation) => void;
   onRename: (id: number, title: string) => void;
   onPin: (c: Conversation) => void;
@@ -101,6 +103,17 @@ function FolderIcon() {
   );
 }
 
+/** v0.5 资料库：叠层图标（一堆资料）。 */
+function LibraryIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M8 2.2 14 5 8 7.8 2 5z" />
+      <path d="M2 8.4 8 11.2 14 8.4" />
+      <path d="M2 11.6 8 14.4 14 11.6" />
+    </svg>
+  );
+}
+
 function PenIcon() {
   return (
     <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -148,7 +161,7 @@ export default function Sidebar(props: Props) {
   const {
     conversations, projects, groups, activeId, generatingConvId, listFilter,
     collapsed, onToggleCollapsed,
-    onNewChat, onOpenSearch, onOpenProjects, onOpenConversation, onRename, onPin, onDelete,
+    onNewChat, onOpenSearch, onOpenProjects, onOpenLibrary, onOpenConversation, onRename, onPin, onDelete,
     onMoveProject, onMoveGroup, onMoveToTaskSection, onCreateGroupFor,
     onBulkMove, onCreateGroupForMany, onBulkDelete, onBulkPin, onSetFilter,
     onCreateGroup, onRenameGroup, onDeleteGroup,
@@ -576,6 +589,7 @@ export default function Sidebar(props: Props) {
         <button type="button" className={`rail-btn ${recentOpen ? "on" : ""}`} data-tip="最近" aria-label="最近会话"
           onClick={e => (recentOpen ? setRecentOpen(false) : openRecent(e.currentTarget))}><ClockIcon /></button>
         <button type="button" className="rail-btn" data-tip="项目" aria-label="项目" onClick={onOpenProjects}><FolderIcon /></button>
+        <button type="button" className="rail-btn" data-tip="资料库" aria-label="资料库" onClick={onOpenLibrary}><LibraryIcon /></button>
       </div>
       <div className="rail-foot">
         <button type="button" className="rail-btn" data-tip="展开侧栏" aria-label="展开侧栏" onClick={() => onToggleCollapsed(false)}>
@@ -619,6 +633,9 @@ export default function Sidebar(props: Props) {
       <button type="button" className="side-action" onClick={() => { closeAll(); onOpenProjects(); }}>
         <FolderIcon /><span>项目</span>
         {projects.length > 0 && <em className="side-action-count">{projects.length}</em>}
+      </button>
+      <button type="button" className="side-action" onClick={() => { closeAll(); onOpenLibrary(); }}>
+        <LibraryIcon /><span>资料库</span>
       </button>
     </div>
 

@@ -62,6 +62,62 @@ export interface Attachment {
   content_type: string;
 }
 
+/** v0.5 资料库条目：磁盘上每个上传/生成文件的记录（重命名只改 filename，url 保持稳定）。 */
+export type AssetKind = "code" | "document" | "image" | "audio" | "video" | "archive" | "other";
+
+export interface FileAsset {
+  id: number;
+  user_id: number;
+  project_id: number | null;
+  conversation_id: number | null;
+  /** uploads = 用户上传；generated = Agent 产出 */
+  category: "uploads" | "generated";
+  stored_name: string;
+  filename: string;
+  url: string;
+  content_type: string;
+  kind: AssetKind;
+  kind_label: string;
+  /** 扩展名徽标文字，如 PY / MD / ZIP */
+  badge: string;
+  /** upload / chat / task / library（存量扫描登记） */
+  source: string;
+  tool: string;
+  size: number;
+  size_label: string;
+  /** 磁盘文件已不存在（外部删除），下载与预览都会失败 */
+  missing: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssetListResult {
+  items: FileAsset[];
+  /** 全库条数 */
+  total: number;
+  /** 当前筛选条件下的条数 */
+  matched: number;
+  kinds: Partial<Record<AssetKind, number>>;
+  categories: Record<string, number>;
+  /** “文件夹”视图计数：project_id 为 null 表示未归类 */
+  projects: { project_id: number | null; count: number }[];
+}
+
+export interface ZipEntry {
+  path: string;
+  size: number;
+  is_dir: boolean;
+}
+
+export interface AssetPreview extends FileAsset {
+  preview: "text" | "image" | "audio" | "video" | "archive" | "binary" | "missing";
+  content?: string;
+  truncated?: boolean;
+  line_count?: number;
+  entries?: ZipEntry[];
+  entry_count?: number;
+}
+
 export interface Artifact {
   filename: string;
   url: string;

@@ -11,6 +11,7 @@ import GlobalTip from "./components/GlobalTip";
 import Sidebar, { type ListFilter } from "./components/Sidebar";
 import SearchModal from "./components/SearchModal";
 import ProjectsModal from "./components/ProjectsModal";
+import LibraryModal from "./components/LibraryModal";
 import TaskWorkspace from "./components/TaskWorkspace";
 import type { Artifact, Attachment, Conversation, Message, Project, StreamEvent, Task, ConvGroup, TaskHit } from "./types/chat";
 
@@ -19,7 +20,9 @@ type ViewMode = "chat" | "task";
 const TOOL_LABELS: Record<string, string> = {
   web_search: "联网搜索",
   fetch_url: "抓取网页",
-  generate_file: "生成文件",
+  generate_file: "生成文档",
+  write_file: "写入文件",
+  create_zip: "打包压缩包",
 };
 
 /** 与后端 provisional_title 保持一致：生成阶段先用截取标题，完成后模型精炼。 */
@@ -107,6 +110,8 @@ export default function App() {
   }, [sidebarCollapsed]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(false);
+  // v0.5 资料库：上传与生成的文件统一查看、重命名、删除、下载
+  const [libraryOpen, setLibraryOpen] = useState(false);
   // 应用内确认弹窗
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const confirmResolve = useRef<((v: boolean) => void) | null>(null);
@@ -771,6 +776,7 @@ export default function App() {
       onNewChat={openHome}
       onOpenSearch={() => setSearchOpen(true)}
       onOpenProjects={() => setProjectsOpen(true)}
+      onOpenLibrary={() => setLibraryOpen(true)}
       onOpenConversation={c => void openConversation(c)}
       onRename={(id, title) => void rename(id, title)}
       onPin={c => void pin(c)}
@@ -802,7 +808,7 @@ export default function App() {
         </div>
         <div className="topbar-meta">
           <span className="meta-item">模型 <b>DeepSeek</b></span>
-          <span className="meta-item">v0.4.6</span>
+          <span className="meta-item">v0.5.0</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
@@ -831,13 +837,14 @@ export default function App() {
             ? <div className="welcome">
                 <div className="welcome-mark">◉</div>
                 <h2>从一个想法开始</h2>
-                <p>输入一句话，Agent 会<b>联网搜索</b>最新信息、<b>生成文档</b>（Word / PDF / Markdown）。
-                需要多步骤的工作时，点顶栏的<b>任务</b>切到任务界面，把目标拆成计划、审阅后逐步执行。<br />
+                <p>输入一句话，Agent 会<b>联网搜索</b>最新信息、<b>生成文件</b>：文档（Word / PDF / Markdown）、
+                代码与配置（按文件名与后缀原样写出）、以及把整套文件<b>打包成 zip</b> 下载。<br />
+                需要多步骤的工作时，点顶栏的<b>任务</b>切到任务界面，把目标拆成计划、审阅后逐步执行。
                 它还会随着交流逐渐<b>记住你的偏好</b>——在“设置 → 记忆”中随时查看与管理。</p>
                 <div className="panel">
                   <div className="panel-cell"><span>模型</span><b>DeepSeek</b></div>
-                  <div className="panel-cell"><span>工具</span><b>搜索 · 文档 · 任务 · 记忆</b></div>
-                  <div className="panel-cell"><span>状态</span><b>就绪</b></div>
+                  <div className="panel-cell"><span>工具</span><b>搜索 · 文档 · 代码 · 压缩包 · 记忆</b></div>
+                  <div className="panel-cell"><span>资料</span><b>侧栏「资料库」统一查看</b></div>
                 </div>
               </div>
             : <div className="messages">{turns.map((t, ti) => {
@@ -960,11 +967,10 @@ export default function App() {
             <div className="composer-bottom">
               <div className="composer-tools">
                 <input ref={fileInputRef} type="file" multiple hidden
-                  accept="image/*,.pdf,.doc,.docx,.md,.txt,.csv,.json,.xlsx,.pptx"
                   onChange={e => void attachFiles(e.target.files)} />
-                <button className="attach-btn" type="button" data-tip="上传文件或图片"
+                <button className="attach-btn" type="button" data-tip="上传文件或图片（文本与代码可直接被读取）"
                   onClick={() => fileInputRef.current?.click()}>＋</button>
-                <span className="hint">支持联网搜索与文档生成；多步工作请切换到顶栏「任务」界面</span>
+                <span className="hint">可上传任意文件（代码/配置/文本会直接读取正文）；多步工作请切换到顶栏「任务」界面</span>
               </div>
               <button className="send-btn" disabled={busy || !input.trim()} onClick={() => void send()}>
                 {busy ? "生成中…" : "发送　↑"}
@@ -1013,6 +1019,17 @@ export default function App() {
         onPin={p => void pinProject(p)}
         onDelete={p => void removeProject(p)}
         onPick={id => setListFilter({ kind: "project", id })}
+      />
+    )}
+    {libraryOpen && (
+      <LibraryModal
+        projects={projects}
+        onClose={() => setLibraryOpen(false)}
+        confirm={askConfirm}
+        onOpenConversation={id => {
+          const c = conversations.find(x => x.id === id);
+          if (c) void openConversation(c);
+        }}
       />
     )}
     {settingsOpen && (
