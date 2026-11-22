@@ -41,7 +41,9 @@ interface Props {
 }
 
 const collapsedStore = "sidebar.collapsedSections";
-const widthStore = "sidebar.width";
+// v0.4.5：默认宽度改为 ≈20% 视口（v0.4.4 的 30% 在高分屏上过宽），存储键升版使旧值作废
+const widthStore = "sidebar.width.v2";
+const DEFAULT_RATIO = 0.2;
 /** 拉伸下限 = v0.4.2 之前的默认宽度；上限与收起态在 clamp 中按视口计算。 */
 const MIN_WIDTH = 246;
 
@@ -64,7 +66,7 @@ function loadWidth(): number {
     const saved = Number(localStorage.getItem(widthStore));
     if (Number.isFinite(saved) && saved >= MIN_WIDTH) return clampWidth(saved);
   } catch { /* 忽略 */ }
-  return clampWidth(Math.round(window.innerWidth * 0.3));
+  return clampWidth(Math.round(window.innerWidth * DEFAULT_RATIO));
 }
 
 function useNarrow(): boolean {
@@ -178,7 +180,7 @@ export default function Sidebar(props: Props) {
   const [draftGroupName, setDraftGroupName] = useState("");
   const [groupMenuKey, setGroupMenuKey] = useState<string | null>(null);
 
-  // 拖宽：默认 ≈ 视口 30%，下限为旧默认宽度，上限 40%
+  // 拖宽：默认 ≈ 视口 20%，下限为旧默认宽度 246px，上限 40%
   const [width, setWidth] = useState<number>(loadWidth);
   useEffect(() => {
     try { localStorage.setItem(widthStore, String(width)); } catch { /* 忽略 */ }
