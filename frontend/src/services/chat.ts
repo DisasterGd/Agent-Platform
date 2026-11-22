@@ -75,7 +75,11 @@ export const chatApi = {
       body: JSON.stringify({ title, project_id: projectId }),
     }),
 
-  updateConversation: (id: number, patch: { title?: string; pinned?: boolean }) =>
+  /** 编辑会话；显式传 project_id / group_id（含 null=移出）才会改动归属。 */
+  updateConversation: (
+    id: number,
+    patch: { title?: string; pinned?: boolean; project_id?: number | null; group_id?: number | null },
+  ) =>
     request<Conversation>(`/api/conversations/${id}`, {
       method: "PATCH",
       body: JSON.stringify(patch),

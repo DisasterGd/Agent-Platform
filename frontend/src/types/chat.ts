@@ -1,9 +1,24 @@
+export type ConversationKind = "chat" | "task";
+
 export interface Conversation {
   id: number;
   title: string;
   pinned: boolean;
   /** v0.4 项目归属：null = 未分组 */
   project_id?: number | null;
+  /** v0.4.1 自定义分组归属：null = 按默认分组归类 */
+  group_id?: number | null;
+  /** v0.4.1 默认分组归类依据：task = 任务模式相关会话 */
+  kind?: ConversationKind;
+  created_at: string;
+  updated_at: string;
+}
+
+/** v0.4.1 用户自定义会话分组（默认分组不建记录，由代码归类）。 */
+export interface ConvGroup {
+  id: number;
+  user_id: number;
+  name: string;
   created_at: string;
   updated_at: string;
 }
@@ -112,4 +127,27 @@ export interface Task {
   created_at: string;
   updated_at: string;
   steps: TaskStep[];
+}
+
+/** v0.4.1 全局搜索：会话结果附带最近一条消息摘要，任务结果附带步骤进度。 */
+export interface ConversationHit extends Conversation {
+  snippet: string;
+}
+
+export interface TaskHit {
+  id: number;
+  conversation_id: number | null;
+  project_id: number | null;
+  goal: string;
+  status: TaskStatus;
+  updated_at: string;
+  steps_total: number;
+  steps_done: number;
+}
+
+export interface SearchResults {
+  conversations: ConversationHit[];
+  tasks: TaskHit[];
+  projects: Project[];
+  groups: ConvGroup[];
 }

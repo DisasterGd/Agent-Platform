@@ -2,12 +2,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { chatApi, type StreamHandlers } from "./services/chat";
 import { tasksApi } from "./services/tasks";
 import { projectsApi } from "./services/projects";
+import { groupsApi } from "./services/groups";
 import Markdown from "./components/Markdown";
 import SettingsModal from "./components/SettingsModal";
 import ConfirmDialog, { type ConfirmState } from "./components/ConfirmDialog";
-import TaskCard from "./components/TaskCard";
 import ThinkingTicker, { useThinkingTracker } from "./components/ThinkingTicker";
-import type { Artifact, Attachment, Conversation, Message, Project, StreamEvent, Task } from "./types/chat";
+import Sidebar, { type ListFilter } from "./components/Sidebar";
+import SearchModal from "./components/SearchModal";
+import ProjectsModal from "./components/ProjectsModal";
+import TaskWorkspace from "./components/TaskWorkspace";
+import type { Artifact, Attachment, Conversation, Message, Project, StreamEvent, Task, ConvGroup, TaskHit } from "./types/chat";
+
+type ViewMode = "chat" | "task";
 
 const TOOL_LABELS: Record<string, string> = {
   web_search: "联网搜索",
@@ -69,55 +75,56 @@ export default function App() {
   // 正在生成的会话 id：侧栏该行显示转圈动画
   const [generatingConvId, setGeneratingConvId] = useState<number | null>(null);
   const [error, setError] = useState("");
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [draftTitle, setDraftTitle] = useState("");
-  const [search, setSearch] = useState("");
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [editingMsgId, setEditingMsgId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [versionSel, setVersionSel] = useState<Record<number, number>>({});
-  const cancelRename = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     try { return (localStorage.getItem("theme") as "light" | "dark") || "light"; }
     catch { return "light"; }
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // v0.3 任务模式
-  const [taskMode, setTaskMode] = useState(false);
-  const [liveTask, setLiveTask] = useState<Task | null>(null);
+  // v0.4.1 双界面：聊天 / 任务。切换只换主区，左侧信息栏不变。
+  const [mode, setMode] = useState<ViewMode>(() => {
+    try { return localStorage.getItem("app.mode") === "task" ? "task" : "chat"; }
+    catch { return "chat"; }
+  });
   const [liveText, setLiveText] = useState("");
-  // v0.4 项目栏：projectFilter = "all" 全部 / "none" 未分组 / number 指定项目
+  const [planning, setPlanning] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [projectFilter, setProjectFilter] = useState<"all" | "none" | number>("all");
-  const [creatingProject, setCreatingProject] = useState(false);
-  const [draftProject, setDraftProject] = useState("");
-  const [projMenuFor, setProjMenuFor] = useState<number | null>(null);
-  const [editingProjId, setEditingProjId] = useState<number | null>(null);
-  const [draftProjName, setDraftProjName] = useState("");
-  // 会话侧边栏：更多菜单 / 多选
-  const [menuFor, setMenuFor] = useState<number | null>(null);
-  const [selectMode, setSelectMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [groups, setGroups] = useState<ConvGroup[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
+  const [listFilter, setListFilter] = useState<ListFilter>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [projectsOpen, setProjectsOpen] = useState(false);
   // 应用内确认弹窗
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const confirmResolve = useRef<((v: boolean) => void) | null>(null);
   const activeIdRef = useRef<number | null>(null);
   activeIdRef.current = activeId;
-  const visibleIdsRef = useRef<number[]>([]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     try { localStorage.setItem("theme", theme); } catch { /* 忽略存储失败 */ }
   }, [theme]);
 
+  useEffect(() => {
+    try { localStorage.setItem("app.mode", mode); } catch { /* 忽略存储失败 */ }
+  }, [mode]);
+
   const refresh = useCallback(async () => {
-    const [items, projs] = await Promise.all([
+    const [items, projs, grps, tks] = await Promise.all([
       chatApi.listConversations(),
       projectsApi.list().catch(() => [] as Project[]),
+      groupsApi.list().catch(() => [] as ConvGroup[]),
+      tasksApi.list().catch(() => [] as Task[]),
     ]);
     setConversations(items);
     setProjects(projs);
+    setGroups(grps);
+    setTasks(tks);
     return items;
   }, []);
 
@@ -139,16 +146,29 @@ export default function App() {
   const load = useCallback(async (id: number) => {
     setActiveId(id);
     setVersionSel({});
-    setLiveTask(null);
+    setLiveText("");
+    const msgs = await chatApi.listMessages(id);
+    setMessages(msgs);
+  }, []);
+
+  /** 打开会话：任务模式相关会话进任务界面并选中其最新任务，普通会话进聊天界面。 */
+  const openConversation = useCallback(async (c: Conversation) => {
+    setActiveId(c.id);
+    setVersionSel({});
     setLiveText("");
     const [msgs, ts] = await Promise.all([
-      chatApi.listMessages(id),
-      tasksApi.listByConversation(id).catch(() => [] as Task[]),
+      chatApi.listMessages(c.id),
+      tasksApi.listByConversation(c.id).catch(() => [] as Task[]),
     ]);
     setMessages(msgs);
-    // 恢复该会话未收尾的任务卡片（待审阅 / 失败可重试）
-    const open = ts.find(t => t.status === "awaiting_approval") ?? ts.find(t => t.status === "failed") ?? null;
-    setLiveTask(open);
+    if (ts.length > 0) {
+      setTasks(cur => [...ts, ...cur.filter(t => !ts.some(x => x.id === t.id))]);
+      setSelectedTaskId(ts[0].id);
+      setMode("task");
+    } else {
+      setSelectedTaskId(null);
+      setMode("chat");
+    }
   }, []);
 
   // 初始界面 = 主界面：只拉列表，不选中任何会话
@@ -156,43 +176,32 @@ export default function App() {
     void refresh().catch((e: unknown) => setError(e instanceof Error ? e.message : "连接后端失败"));
   }, [refresh]);
 
-  /** “新建会话”不立即落库：切回主界面，首次发送时才真正创建会话。 */
+  /** “新聊天”不立即落库：切回聊天主界面，首次发送时才真正创建会话。 */
   function openHome() {
     setActiveId(null);
     setMessages([]);
-    setLiveTask(null);
     setLiveText("");
     setVersionSel({});
     setError("");
-    setMenuFor(null);
-    setSelectMode(false);
-    setSelectedIds(new Set());
+    setMode("chat");
   }
 
-  // ---------- v0.4 项目栏 ----------
+  // ---------- v0.4.1 项目管理（弹窗调用） ----------
 
-  async function createProject() {
-    const name = draftProject.trim();
-    setCreatingProject(false);
-    setDraftProject("");
-    if (!name) return;
+  async function createProject(name: string) {
     try {
       setError("");
       const p = await projectsApi.create(name);
       setProjects(cur => [p, ...cur]);
-      setProjectFilter(p.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "项目创建失败");
     }
   }
 
   async function renameProject(id: number, name: string) {
-    setEditingProjId(null);
-    const next = name.trim();
-    if (!next || next === projects.find(p => p.id === id)?.name) return;
     try {
       setError("");
-      const p = await projectsApi.update(id, { name: next });
+      const p = await projectsApi.update(id, { name });
       setProjects(cur => cur.map(x => (x.id === id ? p : x)));
     } catch (e) {
       setError(e instanceof Error ? e.message : "重命名失败");
@@ -212,36 +221,65 @@ export default function App() {
   async function removeProject(p: Project) {
     const ok = await askConfirm(
       "删除项目",
-      `删除项目「${p.name}」？其中的会话会退回“未分组”（不删除），项目记忆将被清除。`,
+      `删除项目「${p.name}」？其中的会话会退回默认分组（不删除），项目记忆将被清除。`,
     );
     if (!ok) return;
     try {
       setError("");
       await projectsApi.remove(p.id);
-      if (projectFilter === p.id) setProjectFilter("all");
+      if (listFilter?.kind === "project" && listFilter.id === p.id) setListFilter(null);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "删除项目失败");
     }
   }
 
-  function startEdit(c: Conversation) {
-    cancelRename.current = false;
-    setEditingId(c.id);
-    setDraftTitle(c.title);
-  }
+  // ---------- v0.4.1 自定义分组 ----------
 
-  async function rename(id: number, title: string) {
-    setEditingId(null);
-    const doCancel = cancelRename.current;
-    cancelRename.current = false;
-    if (doCancel) return;
-
-    const next = title.trim();
-    if (!next || next === conversations.find(c => c.id === id)?.title) return;
+  async function createGroup(name: string) {
     try {
       setError("");
-      await chatApi.updateConversation(id, { title: next });
+      const g = await groupsApi.create(name);
+      setGroups(cur => [...cur, g]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "分组创建失败");
+    }
+  }
+
+  async function renameGroup(id: number, name: string) {
+    try {
+      setError("");
+      const g = await groupsApi.rename(id, name);
+      setGroups(cur => cur.map(x => (x.id === id ? g : x)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "分组重命名失败");
+    }
+  }
+
+  async function removeGroup(g: ConvGroup) {
+    const ok = await askConfirm(
+      "删除分组",
+      `删除分组「${g.name}」？其中的会话将退回默认分组（项目 / 任务 / 未分组），不会删除会话。`,
+      false,
+      { confirm: "删除分组" },
+    );
+    if (!ok) return;
+    try {
+      setError("");
+      await groupsApi.remove(g.id);
+      if (listFilter?.kind === "group" && listFilter.id === g.id) setListFilter(null);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "删除分组失败");
+    }
+  }
+
+  // ---------- 会话操作 ----------
+
+  async function rename(id: number, title: string) {
+    try {
+      setError("");
+      await chatApi.updateConversation(id, { title });
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "重命名失败");
@@ -264,11 +302,6 @@ export default function App() {
     try {
       setError("");
       await chatApi.deleteConversation(c.id);
-      setSelectedIds(cur => {
-        const n = new Set(cur);
-        n.delete(c.id);
-        return n;
-      });
       if (activeId === c.id) openHome();
       else await refresh();
     } catch (e) {
@@ -276,27 +309,19 @@ export default function App() {
     }
   }
 
-  function toggleSelect(id: number) {
-    setSelectedIds(cur => {
-      const n = new Set(cur);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
+  /** 添加至项目 / 添加至分组（以及移出）：PATCH 显式字段，改完刷新列表重算归类。 */
+  async function moveConv(id: number, patch: { project_id?: number | null; group_id?: number | null }) {
+    try {
+      setError("");
+      const updated = await chatApi.updateConversation(id, patch);
+      setConversations(cur => cur.map(c => (c.id === id ? { ...c, ...updated } : c)));
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "移动失败");
+    }
   }
 
-  function toggleSelectMode() {
-    setSelectMode(v => !v);
-    setSelectedIds(new Set());
-    setMenuFor(null);
-  }
-
-  function toggleAllSelected() {
-    setSelectedIds(cur => (cur.size ? new Set() : new Set(visibleIdsRef.current)));
-  }
-
-  async function bulkDelete() {
-    const ids = [...selectedIds];
+  async function bulkDelete(ids: number[]) {
     if (!ids.length) return;
     const ok = await askConfirm("删除会话", `确认删除选中的 ${ids.length} 个会话？此操作不可恢复。`);
     if (!ok) return;
@@ -306,19 +331,14 @@ export default function App() {
       try { await chatApi.deleteConversation(id); } catch { failed += 1; }
     }
     if (failed) setError(`${failed} 个会话删除失败`);
-    const wasActive = activeId !== null && selectedIds.has(activeId);
-    setSelectedIds(new Set());
-    setSelectMode(false);
-    if (wasActive) openHome();
+    if (activeId !== null && ids.includes(activeId)) openHome();
     else await refresh();
   }
 
-  async function bulkPin(pinned: boolean) {
-    for (const id of selectedIds) {
+  async function bulkPin(ids: number[], pinned: boolean) {
+    for (const id of ids) {
       try { await chatApi.updateConversation(id, { pinned }); } catch { /* 单个失败不阻断批量 */ }
     }
-    setSelectedIds(new Set());
-    setSelectMode(false);
     await refresh();
   }
 
@@ -372,41 +392,22 @@ export default function App() {
     const content = input.trim();
     if (!content || busy) return;
     setError("");
-    if (taskMode) {
-      // 任务模式：先落一个会话（生成阶段即建会话），再创建任务；审阅后在卡片上点“执行计划”
-      setBusy(true);
-      thinking.begin("正在拆解任务、生成计划…");
-      try {
-        let cid = activeId;
-        if (cid === null) {
-          const item = await chatApi.createConversation(truncTitle(content), typeof projectFilter === "number" ? projectFilter : null);
-          cid = item.id;
-          setActiveId(cid);
-          setConversations(cur => [item, ...cur]);
-        }
-        const task = await tasksApi.create(content, cid);
-        setLiveTask(task);
-        setLiveText("");
-        setInput("");
-        setAttachments([]);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "任务创建失败");
-      } finally {
-        thinking.end();
-        setBusy(false);
-      }
-      return;
-    }
     setBusy(true);
     thinking.begin("正在生成回复…");
     let id = activeId;
     try {
       if (id === null) {
-        // 生成阶段就创建会话：内容、失败与中断都有处可归；归属当前选中项目
-        const item = await chatApi.createConversation(truncTitle(content), typeof projectFilter === "number" ? projectFilter : null);
+        // 生成阶段就创建会话：内容、失败与中断都有处可归；归入当前筛选的项目/分组
+        const projectId = listFilter?.kind === "project" ? listFilter.id : null;
+        const groupId = listFilter?.kind === "group" ? listFilter.id : null;
+        let item = await chatApi.createConversation(truncTitle(content), projectId);
+        if (groupId != null) {
+          try { item = await chatApi.updateConversation(item.id, { group_id: groupId }); }
+          catch { /* 归属失败不阻断聊天 */ }
+        }
         id = item.id;
         setActiveId(id);
-        setConversations(cur => [{ ...item, title: truncTitle(content) }, ...cur]);
+        setConversations(cur => [item, ...cur]);
       }
       const sentAttachments = [...attachments];
       const userMessage: Message = {
@@ -493,21 +494,40 @@ export default function App() {
     }
   }
 
-  /** v0.3：任务执行事件 → 卡片状态 + 思考过程展示。 */
-  function handleTaskEvent(ev: StreamEvent) {
+  // ---------- v0.4.1 任务界面 ----------
+
+  function patchTask(id: number, fn: (t: Task) => Task) {
+    setTasks(cur => cur.map(t => (t.id === id ? fn(t) : t)));
+  }
+
+  async function createTask(goal: string) {
+    if (planning || busy) return;
+    setPlanning(true);
+    thinking.begin("正在拆解任务、生成计划…");
+    setError("");
+    try {
+      const projectId = listFilter?.kind === "project" ? listFilter.id : null;
+      const task = await tasksApi.create(goal, null, projectId);
+      setTasks(cur => [task, ...cur.filter(t => t.id !== task.id)]);
+      setSelectedTaskId(task.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "任务创建失败");
+    } finally {
+      thinking.end();
+      setPlanning(false);
+    }
+  }
+
+  /** v0.3：任务执行事件 → 任务列表状态 + 思考过程展示。 */
+  function handleTaskEvent(ev: StreamEvent, taskId: number) {
     switch (ev.type) {
       case "plan_created": {
         setLiveText("");
-        setLiveTask(t => (t ? { ...t, status: "running", steps: ev.steps ?? t.steps } : t));
+        patchTask(taskId, t => ({ ...t, status: "running", steps: ev.steps ?? t.steps }));
         const cid = ev.conversation_id ?? null;
         if (cid !== null) {
           // 执行开始即绑定/新建会话：侧栏立刻可见，失败也有记录可回看
           setGeneratingConvId(cid);
-          setConversations(cur => cur.map(c =>
-            c.id === cid && c.title === "新会话"
-              ? { ...c, title: truncTitle(liveTask?.goal ?? c.title) }
-              : c
-          ));
           void refresh().catch(() => undefined);
         }
         thinking.pushLabel("计划已确认，开始执行");
@@ -516,35 +536,31 @@ export default function App() {
       case "step_started":
         setLiveText("");
         thinking.pushLabel(`执行步骤 ${(ev.index ?? 0) + 1}：${ev.title ?? ""}`);
-        setLiveTask(t => (t ? { ...t, status: "running", steps: t.steps.map(s => (s.idx === ev.index ? { ...s, status: "running" as const } : s)) } : t));
+        patchTask(taskId, t => ({ ...t, status: "running", steps: t.steps.map(s => (s.idx === ev.index ? { ...s, status: "running" as const } : s)) }));
         break;
       case "text_delta":
         setLiveText(prev => prev + (ev.content ?? ""));
         break;
       case "artifact_ready":
-        setLiveTask(t => (t ? { ...t, steps: t.steps.map(s => (s.status === "running"
+        patchTask(taskId, t => ({ ...t, steps: t.steps.map(s => (s.status === "running"
           ? { ...s, artifacts: [...(s.artifacts ?? []), { filename: ev.filename ?? "", url: ev.url ?? "", format: ev.format ?? "" }] }
-          : s)) } : t));
+          : s)) }));
         break;
       case "step_completed":
         setLiveText("");
         thinking.pushLabel(`步骤 ${(ev.index ?? 0) + 1} 完成`);
-        setLiveTask(t => (t ? { ...t, steps: t.steps.map(s => (s.idx === ev.index
+        patchTask(taskId, t => ({ ...t, steps: t.steps.map(s => (s.idx === ev.index
           ? { ...s, status: "done" as const, summary: ev.summary ?? "", artifacts: ev.artifacts ?? s.artifacts }
-          : s)) } : t));
+          : s)) }));
         break;
       case "step_failed":
         thinking.pushLabel(`⚠ 步骤 ${(ev.index ?? 0) + 1} 失败：${ev.error ?? ""}`);
-        setLiveTask(t => (t ? { ...t, status: "failed", steps: t.steps.map(s => (s.idx === ev.index ? { ...s, status: "failed" as const, error: ev.error ?? "" } : s)) } : t));
+        patchTask(taskId, t => ({ ...t, status: "failed", steps: t.steps.map(s => (s.idx === ev.index ? { ...s, status: "failed" as const, error: ev.error ?? "" } : s)) }));
         break;
       case "task_completed": {
         const st = ev.status ?? "completed";
-        if (st === "cancelled") {
-          setLiveTask(null);
-          setLiveText("");
-        } else {
-          setLiveTask(t => (t ? { ...t, status: st } : t));
-        }
+        patchTask(taskId, t => ({ ...t, status: st }));
+        setLiveText("");
         break;
       }
     }
@@ -555,55 +571,77 @@ export default function App() {
     setBusy(true);
     thinking.begin("准备执行计划…");
     setError("");
+    // streamHandlers(-1)：占位消息 id 不存在 → onDelta 无副作用，只借工具读数与事件旁路
     try {
-      // streamHandlers(-1)：占位消息 id 不存在 → onDelta 无副作用，只借工具读数与事件旁路
-      await tasksApi.execute(taskId, { ...streamHandlers(-1), onEvent: handleTaskEvent });
+      await tasksApi.execute(taskId, { ...streamHandlers(-1), onEvent: ev => handleTaskEvent(ev, taskId) });
     } catch (e) {
       setError(e instanceof Error ? e.message : "任务执行失败");
     } finally {
+      setGeneratingConvId(null);
       thinking.end();
       setBusy(false);
     }
-    setGeneratingConvId(null);
+    // 完成/失败都已绑定会话：以服务端为准回填任务与会话列表
     try {
       const latest = await tasksApi.get(taskId);
-      const cid = latest.conversation_id;
-      const staying = activeIdRef.current === null || activeIdRef.current === cid;
-      if (staying) {
-        // 成功/失败都已绑定会话：回到会话即可看到目标、记录与任务卡片
-        if (latest.status === "completed") {
-          setLiveTask(null);
-          setLiveText("");
-        } else {
-          setLiveTask(latest);
-        }
-        if (cid !== null) await load(cid);
+      patchTask(taskId, () => latest);
+      if (activeIdRef.current !== null && latest.conversation_id === activeIdRef.current) {
+        await load(latest.conversation_id);
       }
       await refresh();
     } catch { /* 同步失败保留现场 */ }
   }
 
-  async function reviseLiveTask(steps: { title: string; detail: string }[]) {
-    if (!liveTask) return;
-    setLiveTask(await tasksApi.revise(liveTask.id, steps));
+  async function reviseTask(taskId: number, steps: { title: string; detail: string }[]) {
+    try {
+      setError("");
+      const updated = await tasksApi.revise(taskId, steps);
+      patchTask(taskId, () => updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "计划更新失败");
+    }
   }
 
-  async function cancelLiveTask() {
-    if (!liveTask) return;
-    const ok = await askConfirm("取消任务", "取消后该任务不再执行；已产生的步骤结果仍会保留。", false,
-      { confirm: "取消任务", cancel: "继续" });
+  /** TaskCard 的取消按钮：执行中 → 取消；待审阅/失败 → 删除任务记录。 */
+  async function cancelOrDeleteTask(taskId: number) {
+    const t = tasks.find(x => x.id === taskId);
+    if (!t) return;
+    if (t.status === "running") {
+      const ok = await askConfirm("取消任务", "取消后该任务不再执行；已产生的步骤结果仍会保留。", false,
+        { confirm: "取消任务", cancel: "继续" });
+      if (!ok) return;
+      try {
+        const updated = await tasksApi.cancel(taskId);
+        patchTask(taskId, () => updated);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "取消任务失败");
+      }
+      return;
+    }
+    const ok = await askConfirm("删除任务", `删除任务「${t.goal.slice(0, 20)}…」？该任务记录会被移除，已产生的会话不受影响。`, false,
+      { confirm: "删除任务" });
     if (!ok) return;
     try {
-      const t = await tasksApi.cancel(liveTask.id);
-      if (t.status === "cancelled") {
-        setLiveTask(null);
-        setLiveText("");
-      } else {
-        setLiveTask(t);
-      }
+      setError("");
+      await tasksApi.remove(taskId);
+      const remaining = tasks.filter(x => x.id !== taskId);
+      setTasks(remaining);
+      if (selectedTaskId === taskId) setSelectedTaskId(remaining[0]?.id ?? null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "取消任务失败");
+      setError(e instanceof Error ? e.message : "删除任务失败");
     }
+  }
+
+  /** 搜索结果点击任务：进任务界面并选中（不在列表里则拉取补齐）。 */
+  function openTaskHit(hit: TaskHit) {
+    setMode("task");
+    setSelectedTaskId(hit.id);
+    void (async () => {
+      try {
+        const latest = await tasksApi.get(hit.id);
+        setTasks(cur => (cur.some(t => t.id === hit.id) ? cur.map(t => (t.id === hit.id ? latest : t)) : [latest, ...cur]));
+      } catch { /* 保留占位选中，列表由下次刷新补齐 */ }
+    })();
   }
 
   function startEditMessage(turn: Turn, row: Message) {
@@ -634,313 +672,249 @@ export default function App() {
   const questions = turns.filter(t => t.role === "user" && t.items[t.items.length - 1].content.trim());
   const activeConv = conversations.find(c => c.id === activeId);
   const lastUserTurn = [...turns].reverse().find(t => t.role === "user");
-  const projectName = (id: number | null) =>
-    id === null ? "未分组" : projects.find(p => p.id === id)?.name ?? "未分组";
-  const visible = conversations.filter(c => {
-    const kw = search.trim().toLowerCase();
-    if (kw && !c.title.toLowerCase().includes(kw)) return false;
-    if (projectFilter === "all") return true;
-    if (projectFilter === "none") return !c.project_id;
-    return c.project_id === projectFilter;
-  });
-  visibleIdsRef.current = visible.map(c => c.id);
+  const activeProjectName = listFilter?.kind === "project"
+    ? projects.find(p => p.id === listFilter.id)?.name ?? null
+    : null;
 
   return <div className="shell">
-    <aside className="sidebar">
-      <div className="brand"><b className="mark">◉</b><div className="brand-word"><strong>Agent</strong><span>工作台</span></div></div>
-      <button className="new" onClick={openHome}>新建会话</button>
-      <div className="section-label proj-head">
-        <span>项目</span>
-        <button type="button" className="proj-add" title="新建项目" aria-label="新建项目"
-          onClick={() => setCreatingProject(true)}>＋</button>
-      </div>
-      <div className="proj-chips">
-        <button type="button" className={`proj-chip ${projectFilter === "all" ? "on" : ""}`}
-          onClick={() => setProjectFilter("all")}>全部</button>
-        {projects.map(p => (
-          <div key={p.id} className={`proj-chip-wrap ${projectFilter === p.id ? "on" : ""}`}>
-            {editingProjId === p.id ? (
-              <input className="proj-chip-input" autoFocus value={draftProjName}
-                onChange={e => setDraftProjName(e.target.value)}
-                onBlur={() => void renameProject(p.id, draftProjName)}
-                onKeyDown={e => {
-                  if (e.key === "Enter") { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); }
-                  if (e.key === "Escape") setEditingProjId(null);
-                }} />
-            ) : (
-              <button type="button" className="proj-chip" title={p.description || p.name}
-                onClick={() => setProjectFilter(projectFilter === p.id ? "all" : p.id)}
-                onDoubleClick={() => { setEditingProjId(p.id); setDraftProjName(p.name); }}>
-                {p.pinned && "📌"}{p.name}
-                <span className="proj-chip-more" role="button" aria-label="项目操作"
-                  onClick={e => { e.stopPropagation(); setProjMenuFor(projMenuFor === p.id ? null : p.id); }}>⋯</span>
-              </button>
-            )}
-            {projMenuFor === p.id && (
-              <>
-                <div className="menu-scrim" onClick={() => setProjMenuFor(null)} />
-                <div className="conv-menu proj-menu">
-                  <button type="button" onClick={() => { setProjMenuFor(null); setEditingProjId(p.id); setDraftProjName(p.name); }}>重命名</button>
-                  <button type="button" onClick={() => { setProjMenuFor(null); void pinProject(p); }}>{p.pinned ? "取消置顶" : "置顶"}</button>
-                  <button type="button" className="danger" onClick={() => { setProjMenuFor(null); void removeProject(p); }}>删除</button>
-                </div>
-              </>
-            )}
-          </div>
-        ))}
-        <button type="button" className={`proj-chip ${projectFilter === "none" ? "on" : ""}`}
-          onClick={() => setProjectFilter("none")}>未分组</button>
-        {creatingProject && (
-          <input className="proj-chip-input" autoFocus placeholder="项目名，Enter 创建"
-            value={draftProject} onChange={e => setDraftProject(e.target.value)}
-            onBlur={() => void createProject()}
-            onKeyDown={e => {
-              if (e.key === "Enter") { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); }
-              if (e.key === "Escape") { setCreatingProject(false); setDraftProject(""); }
-            }} />
-        )}
-      </div>
-      <div className="section-label conv-head">
-        <span>会话{projectFilter !== "all" ? ` · ${typeof projectFilter === "number" ? projectName(projectFilter) : "未分组"}` : ""}</span>
-        <button type="button" className={`conv-select-toggle ${selectMode ? "on" : ""}`} onClick={toggleSelectMode}>
-          {selectMode ? "退出多选" : "多选"}
-        </button>
-      </div>
-      <input className="conv-search" placeholder="搜索会话…" value={search}
-        onChange={e => setSearch(e.target.value)} />
-      {selectMode && (
-        <div className="conv-bulk-bar">
-          <button type="button"
-            onClick={toggleAllSelected}>{selectedIds.size > 0 && selectedIds.size === visibleIdsRef.current.length ? "取消全选" : "全选"}</button>
-          <em>已选 {selectedIds.size}</em>
-          <button type="button" disabled={!selectedIds.size} onClick={() => void bulkPin(true)}>置顶</button>
-          <button type="button" disabled={!selectedIds.size} onClick={() => void bulkPin(false)}>取消置顶</button>
-          <button type="button" className="danger" disabled={!selectedIds.size} onClick={() => void bulkDelete()}>删除</button>
-        </div>
-      )}
-      <nav className="conv-list">{visible.map(c =>
-        editingId === c.id ? (
-          <input key={c.id} className="rename-input" autoFocus value={draftTitle}
-            onChange={e => setDraftTitle(e.target.value)}
-            onBlur={() => void rename(c.id, draftTitle)}
-            onKeyDown={e => {
-              if (e.key === "Enter") { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); }
-              if (e.key === "Escape") { cancelRename.current = true; setEditingId(null); }
-            }} />
-        ) : (
-          <div key={c.id} className={`conv-item ${activeId === c.id ? "selected" : ""} ${selectMode && selectedIds.has(c.id) ? "checked" : ""}`}>
-            {selectMode && (
-              <input type="checkbox" className="conv-check" checked={selectedIds.has(c.id)}
-                onChange={() => toggleSelect(c.id)} aria-label={`选择会话 ${c.title}`} />
-            )}
-            <button className="conv-title" title={c.title}
-              onClick={() => (selectMode ? toggleSelect(c.id) : void load(c.id))}
-              onDoubleClick={() => startEdit(c)}>
-              {generatingConvId === c.id && (
-                <span className="conv-spinner" role="status" aria-label="正在生成" title="正在生成" />
-              )}
-              {c.pinned && <span className="conv-pin-flag" title="已置顶">📌</span>}
-              {c.title}
-            </button>
-            {!selectMode && (
-              <button className="conv-more" type="button" title="更多操作" aria-label="更多操作"
-                onClick={() => setMenuFor(menuFor === c.id ? null : c.id)}>⋯</button>
-            )}
-            {menuFor === c.id && (
-              <>
-                <div className="menu-scrim" onClick={() => setMenuFor(null)} />
-                <div className="conv-menu">
-                  <button type="button" onClick={() => { setMenuFor(null); startEdit(c); }}>重命名</button>
-                  <button type="button" onClick={() => { setMenuFor(null); void pin(c); }}>{c.pinned ? "取消置顶" : "置顶"}</button>
-                  <button type="button" className="danger" onClick={() => { setMenuFor(null); void removeConv(c); }}>删除</button>
-                </div>
-              </>
-            )}
-          </div>
-        )
-      )}</nav>
-      <div className="side-foot"><span className="led" />本地运行</div>
-    </aside>
+    <Sidebar
+      conversations={conversations} projects={projects} groups={groups}
+      activeId={activeId} generatingConvId={generatingConvId} listFilter={listFilter}
+      onNewChat={openHome}
+      onOpenSearch={() => setSearchOpen(true)}
+      onOpenProjects={() => setProjectsOpen(true)}
+      onOpenConversation={c => void openConversation(c)}
+      onRename={(id, title) => void rename(id, title)}
+      onPin={c => void pin(c)}
+      onDelete={c => void removeConv(c)}
+      onMoveProject={(id, projectId) => void moveConv(id, { project_id: projectId })}
+      onMoveGroup={(id, groupId) => void moveConv(id, { group_id: groupId })}
+      onBulkDelete={ids => void bulkDelete(ids)}
+      onBulkPin={(ids, pinned) => void bulkPin(ids, pinned)}
+      onSetFilter={setListFilter}
+      onCreateGroup={name => void createGroup(name)}
+      onRenameGroup={(id, name) => void renameGroup(id, name)}
+      onDeleteGroup={g => void removeGroup(g)}
+    />
 
     <main className="main">
       <header className="topbar">
-        <div className="topbar-title">{activeConv?.title ?? "主界面"}</div>
+        <div className="topbar-left">
+          <div className="mode-switch" role="tablist" aria-label="界面切换">
+            <button type="button" role="tab" aria-selected={mode === "chat"}
+              className={mode === "chat" ? "on" : ""} onClick={() => setMode("chat")}>聊天</button>
+            <button type="button" role="tab" aria-selected={mode === "task"}
+              className={mode === "task" ? "on" : ""} onClick={() => setMode("task")}>任务</button>
+          </div>
+          <div className="topbar-title">{mode === "task" ? "任务中心" : activeConv?.title ?? "主界面"}</div>
+        </div>
         <div className="topbar-meta">
           <span className="meta-item">模型 <b>DeepSeek</b></span>
-          <span className="meta-item">v0.4.0</span>
+          <span className="meta-item">v0.4.1</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
       </header>
 
-      {questions.length > 0 && (
-        <aside className="index">
-          <div className="index-head"><span>问题索引</span><em>{questions.length}</em></div>
-          <div className="index-list">
-            {questions.map((q, i) => {
-              const latest = q.items[q.items.length - 1];
-              return (
-              <button key={q.key} className="index-item" title={latest.content} onClick={() => jumpTo(q.key)}>
-                <span className="index-num">{i + 1}</span>
-                <span className="index-label">{latest.content.replace(/\s+/g, " ").trim().slice(0, 18) || "…"}</span>
-              </button>
-              );
-            })}
-          </div>
-        </aside>
-      )}
-
-      <section className="chat-area">
-        {turns.length === 0 && !liveTask
-          ? <div className="welcome">
-              <div className="welcome-mark">◉</div>
-              <h2>从一个想法开始</h2>
-              <p>输入一句话，Agent 会<b>联网搜索</b>最新信息、<b>生成文档</b>（Word / PDF / Markdown），
-              或打开<b>任务模式</b>把目标拆解为多步计划执行。<br />
-              它还会随着交流逐渐<b>记住你的偏好</b>——在“设置 → 记忆”中随时查看与管理。</p>
-              <div className="panel">
-                <div className="panel-cell"><span>模型</span><b>DeepSeek</b></div>
-                <div className="panel-cell"><span>工具</span><b>搜索 · 文档 · 任务 · 记忆</b></div>
-                <div className="panel-cell"><span>状态</span><b>就绪</b></div>
-              </div>
+      {mode === "chat" ? (<>
+        {questions.length > 0 && (
+          <aside className="index">
+            <div className="index-head"><span>问题索引</span><em>{questions.length}</em></div>
+            <div className="index-list">
+              {questions.map((q, i) => {
+                const latest = q.items[q.items.length - 1];
+                return (
+                <button key={q.key} className="index-item" title={latest.content} onClick={() => jumpTo(q.key)}>
+                  <span className="index-num">{i + 1}</span>
+                  <span className="index-label">{latest.content.replace(/\s+/g, " ").trim().slice(0, 18) || "…"}</span>
+                </button>
+                );
+              })}
             </div>
-          : <div className="messages">{turns.map((t, ti) => {
-              const isLastTurn = ti === turns.length - 1;
-              const sel = selectedVersion(versionSel, t);
-              const row = t.items[sel];
-              const hasVariants = t.items.length > 1;
-              const isEditing = editingMsgId === t.key;
-              // 版本翻页器：同一逻辑消息有多个版本（重新生成/编辑产生）时显示“‹ n/N ›”
-              const pager = hasVariants && (
-                <span className="msg-versions" title="该消息有多个版本，可左右翻页查看">
-                  <button type="button" aria-label="上一版本" disabled={sel <= 0}
-                    onClick={() => setVersionSel(v => ({ ...v, [t.key]: Math.max(0, selectedVersion(v, t) - 1) }))}>‹</button>
-                  <em>{sel + 1}/{t.items.length}</em>
-                  <button type="button" aria-label="下一版本" disabled={sel >= t.items.length - 1}
-                    onClick={() => setVersionSel(v => ({ ...v, [t.key]: Math.min(t.items.length - 1, selectedVersion(v, t) + 1) }))}>›</button>
-                </span>
-              );
-              return (
-              <article id={`msg-${t.key}`} className={`message ${t.role}`} key={t.key}>
-                <div className="msg-meta">
-                  <span className="msg-who">{t.role === "user" ? "你" : "AGENT"}</span>
-                  <span className="msg-time">{fmtTime(row.created_at)}</span>
-                  {row.content && (
-                    <button className="msg-copy" type="button" onClick={() => void copyMessage(row)}>
-                      {copiedId === row.id ? "已复制" : "复制"}
-                    </button>
-                  )}
+          </aside>
+        )}
+
+        <section className="chat-area">
+          {turns.length === 0
+            ? <div className="welcome">
+                <div className="welcome-mark">◉</div>
+                <h2>从一个想法开始</h2>
+                <p>输入一句话，Agent 会<b>联网搜索</b>最新信息、<b>生成文档</b>（Word / PDF / Markdown）。
+                需要多步骤的工作时，点顶栏的<b>任务</b>切到任务界面，把目标拆成计划、审阅后逐步执行。<br />
+                它还会随着交流逐渐<b>记住你的偏好</b>——在“设置 → 记忆”中随时查看与管理。</p>
+                <div className="panel">
+                  <div className="panel-cell"><span>模型</span><b>DeepSeek</b></div>
+                  <div className="panel-cell"><span>工具</span><b>搜索 · 文档 · 任务 · 记忆</b></div>
+                  <div className="panel-cell"><span>状态</span><b>就绪</b></div>
                 </div>
-                <div className="body">
-                  {t.role === "user"
-                    ? isEditing
-                      ? (<div className="edit-box">
-                          <textarea autoFocus value={editDraft}
-                            onChange={e => setEditDraft(e.target.value)}
-                            onKeyDown={e => { if (e.key === "Escape") cancelEditMessage(); }} />
-                          <div className="edit-actions">
-                            <button type="button" onClick={cancelEditMessage}>取消</button>
-                            <button type="button" className="primary" disabled={busy || !editDraft.trim()}
-                              onClick={() => void regenerate(row.id, editDraft.trim())}>保存并重新生成</button>
-                          </div>
-                        </div>)
+              </div>
+            : <div className="messages">{turns.map((t, ti) => {
+                const isLastTurn = ti === turns.length - 1;
+                const sel = selectedVersion(versionSel, t);
+                const row = t.items[sel];
+                const hasVariants = t.items.length > 1;
+                const isEditing = editingMsgId === t.key;
+                // 版本翻页器：同一逻辑消息有多个版本（重新生成/编辑产生）时显示“‹ n/N ›”
+                const pager = hasVariants && (
+                  <span className="msg-versions" title="该消息有多个版本，可左右翻页查看">
+                    <button type="button" aria-label="上一版本" disabled={sel <= 0}
+                      onClick={() => setVersionSel(v => ({ ...v, [t.key]: Math.max(0, selectedVersion(v, t) - 1) }))}>‹</button>
+                    <em>{sel + 1}/{t.items.length}</em>
+                    <button type="button" aria-label="下一版本" disabled={sel >= t.items.length - 1}
+                      onClick={() => setVersionSel(v => ({ ...v, [t.key]: Math.min(t.items.length - 1, selectedVersion(v, t) + 1) }))}>›</button>
+                  </span>
+                );
+                return (
+                <article id={`msg-${t.key}`} className={`message ${t.role}`} key={t.key}>
+                  <div className="msg-meta">
+                    <span className="msg-who">{t.role === "user" ? "你" : "AGENT"}</span>
+                    <span className="msg-time">{fmtTime(row.created_at)}</span>
+                    {row.content && (
+                      <button className="msg-copy" type="button" onClick={() => void copyMessage(row)}>
+                        {copiedId === row.id ? "已复制" : "复制"}
+                      </button>
+                    )}
+                  </div>
+                  <div className="body">
+                    {t.role === "user"
+                      ? isEditing
+                        ? (<div className="edit-box">
+                            <textarea autoFocus value={editDraft}
+                              onChange={e => setEditDraft(e.target.value)}
+                              onKeyDown={e => { if (e.key === "Escape") cancelEditMessage(); }} />
+                            <div className="edit-actions">
+                              <button type="button" onClick={cancelEditMessage}>取消</button>
+                              <button type="button" className="primary" disabled={busy || !editDraft.trim()}
+                                onClick={() => void regenerate(row.id, editDraft.trim())}>保存并重新生成</button>
+                            </div>
+                          </div>)
+                        : (<>
+                            {row.content && <p className="user-text">{row.content}</p>}
+                            {row.attachments && row.attachments.length > 0 && (
+                              <div className="attachments">
+                                {row.attachments.map((a, i) => a.content_type.startsWith("image/")
+                                  ? <a key={i} className="attachment-image" href={a.url} target="_blank" rel="noreferrer"><img src={a.url} alt={a.name} /></a>
+                                  : <a key={i} className="attachment-file" href={a.url} target="_blank" rel="noreferrer">📄 {a.name}</a>
+                                )}
+                              </div>
+                            )}
+                            {(hasVariants || (isLastTurn && !busy)) && (
+                              <div className="msg-actions">
+                                {pager}
+                                {isLastTurn && !busy && (
+                                  <button className="msg-action" type="button" onClick={() => startEditMessage(t, row)}>编辑</button>
+                                )}
+                              </div>
+                            )}
+                          </>)
                       : (<>
-                          {row.content && <p className="user-text">{row.content}</p>}
-                          {row.attachments && row.attachments.length > 0 && (
-                            <div className="attachments">
-                              {row.attachments.map((a, i) => a.content_type.startsWith("image/")
-                                ? <a key={i} className="attachment-image" href={a.url} target="_blank" rel="noreferrer"><img src={a.url} alt={a.name} /></a>
-                                : <a key={i} className="attachment-file" href={a.url} target="_blank" rel="noreferrer">📄 {a.name}</a>
-                              )}
+                          {row.content ? <Markdown content={row.content} />
+                            : <span className="thinking">{busy ? "正在思考…" : ""}</span>}
+                          {row.artifacts && row.artifacts.length > 0 && (
+                            <div className="artifacts">
+                              {row.artifacts.map((a, i) => (
+                                <a key={i} className="artifact" href={a.url} download={a.filename} target="_blank" rel="noreferrer">
+                                  <span className="artifact-icon">📄</span>
+                                  <span className="artifact-name">{a.filename}</span>
+                                  <span className="artifact-dl">下载</span>
+                                </a>
+                              ))}
                             </div>
                           )}
-                          {(hasVariants || (isLastTurn && !busy)) && (
+                          {(hasVariants || (isLastTurn && !busy && row.content && lastUserTurn)) && (
                             <div className="msg-actions">
                               {pager}
-                              {isLastTurn && !busy && (
-                                <button className="msg-action" type="button" onClick={() => startEditMessage(t, row)}>编辑</button>
+                              {isLastTurn && !busy && row.content && lastUserTurn && (
+                                <button className="msg-action" type="button"
+                                  onClick={() => void regenerate(lastUserTurn.items[selectedVersion(versionSel, lastUserTurn)].id)}>重新生成</button>
                               )}
                             </div>
                           )}
-                        </>)
-                    : (<>
-                        {row.content ? <Markdown content={row.content} />
-                          : <span className="thinking">{busy ? "正在思考…" : ""}</span>}
-                        {row.artifacts && row.artifacts.length > 0 && (
-                          <div className="artifacts">
-                            {row.artifacts.map((a, i) => (
-                              <a key={i} className="artifact" href={a.url} download={a.filename} target="_blank" rel="noreferrer">
-                                <span className="artifact-icon">📄</span>
-                                <span className="artifact-name">{a.filename}</span>
-                                <span className="artifact-dl">下载</span>
-                              </a>
-                            ))}
-                          </div>
-                        )}
-                        {(hasVariants || (isLastTurn && !busy && row.content && lastUserTurn)) && (
-                          <div className="msg-actions">
-                            {pager}
-                            {isLastTurn && !busy && row.content && lastUserTurn && (
-                              <button className="msg-action" type="button"
-                                onClick={() => void regenerate(lastUserTurn.items[selectedVersion(versionSel, lastUserTurn)].id)}>重新生成</button>
-                            )}
-                          </div>
-                        )}
-                      </>)}
-                </div>
-              </article>
-              );
-            })}
-            {liveTask && (
-              <TaskCard task={liveTask} liveText={liveText} busy={busy}
-                onExecute={() => void executeTask(liveTask.id)}
-                onCancel={() => void cancelLiveTask()}
-                onRevise={reviseLiveTask} />
-            )}
-            </div>}
-      </section>
+                        </>)}
+                  </div>
+                </article>
+                );
+              })}</div>}
+        </section>
 
-      <div className="composer-wrap">
-        <ThinkingTicker tracker={thinking} />
-        {error && <div className="error">{error}</div>}
-        <div className="composer">
-          {attachments.length > 0 && (
-            <div className="attachment-chips">
-              {attachments.map((a, i) => (
-                <span className="chip" key={i}>
-                  {a.content_type.startsWith("image/")
-                    ? <img src={a.url} alt={a.name} />
-                    : <span className="chip-file">📄 {a.name}</span>}
-                  <button type="button" title="移除" onClick={() => removeAttachment(i)}>×</button>
-                </span>
-              ))}
+        <div className="composer-wrap">
+          <ThinkingTicker tracker={thinking} />
+          {error && <div className="error">{error}</div>}
+          <div className="composer">
+            {attachments.length > 0 && (
+              <div className="attachment-chips">
+                {attachments.map((a, i) => (
+                  <span className="chip" key={i}>
+                    {a.content_type.startsWith("image/")
+                      ? <img src={a.url} alt={a.name} />
+                      : <span className="chip-file">📄 {a.name}</span>}
+                    <button type="button" title="移除" onClick={() => removeAttachment(i)}>×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <textarea className="composer-input" rows={2} value={input} disabled={busy}
+              placeholder="向 Agent 发送消息…（Enter 发送，Shift + Enter 换行）"
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }} />
+            <div className="composer-bottom">
+              <div className="composer-tools">
+                <input ref={fileInputRef} type="file" multiple hidden
+                  accept="image/*,.pdf,.doc,.docx,.md,.txt,.csv,.json,.xlsx,.pptx"
+                  onChange={e => void attachFiles(e.target.files)} />
+                <button className="attach-btn" type="button" title="上传文件或图片"
+                  onClick={() => fileInputRef.current?.click()}>＋</button>
+                <span className="hint">支持联网搜索与文档生成；多步工作请切换到顶栏「任务」界面</span>
+              </div>
+              <button className="send-btn" disabled={busy || !input.trim()} onClick={() => void send()}>
+                {busy ? "生成中…" : "发送　↑"}
+              </button>
             </div>
-          )}
-          <textarea className="composer-input" rows={2} value={input} disabled={busy}
-            placeholder="向 Agent 发送消息…（Enter 发送，Shift + Enter 换行）"
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }} />
-          <div className="composer-bottom">
-            <div className="composer-tools">
-              <input ref={fileInputRef} type="file" multiple hidden
-                accept="image/*,.pdf,.doc,.docx,.md,.txt,.csv,.json,.xlsx,.pptx"
-                onChange={e => void attachFiles(e.target.files)} />
-              <button className="attach-btn" type="button" title="上传文件或图片"
-                onClick={() => fileInputRef.current?.click()}>＋</button>
-              <button type="button" className={`mode-pill ${taskMode ? "on" : ""}`}
-                title="任务模式：把目标拆解为多步计划，审阅后执行"
-                onClick={() => setTaskMode(v => !v)}>任务模式</button>
-              <span className="hint">{taskMode ? "描述一个目标，Agent 先给出执行计划" : "支持联网搜索与文档生成"}</span>
-            </div>
-            <button className="send-btn" disabled={busy || !input.trim()} onClick={() => void send()}>
-              {busy ? (liveTask?.status === "running" ? "执行中…" : taskMode ? "规划中…" : "生成中…") : taskMode ? "规划任务" : "发送　↑"}
-            </button>
           </div>
+          <p className="disclaimer">Agent 可能生成不准确的信息。重要内容请自行核实。</p>
         </div>
-        <p className="disclaimer">Agent 可能生成不准确的信息。重要内容请自行核实。</p>
-      </div>
+      </>) : (
+        <TaskWorkspace
+          tasks={tasks} selectedId={selectedTaskId} busy={busy} planning={planning} liveText={liveText}
+          thinking={thinking} error={error} projectName={activeProjectName} conversations={conversations}
+          onSelect={setSelectedTaskId}
+          onCreate={goal => void createTask(goal)}
+          onExecute={id => void executeTask(id)}
+          onCancel={id => void cancelOrDeleteTask(id)}
+          onRevise={reviseTask}
+          onOpenConversation={id => {
+            const c = conversations.find(x => x.id === id);
+            if (c) void openConversation(c);
+            else void (async () => { try { await refresh(); } catch { /* 会话可能已删除 */ } })();
+          }}
+        />
+      )}
     </main>
 
+    {searchOpen && (
+      <SearchModal
+        projects={projects} groups={groups} conversations={conversations}
+        onClose={() => setSearchOpen(false)}
+        onOpenConversation={id => {
+          const c = conversations.find(x => x.id === id);
+          if (c) void openConversation(c);
+        }}
+        onOpenTask={openTaskHit}
+        onOpenProject={id => setListFilter({ kind: "project", id })}
+        onOpenGroup={id => setListFilter({ kind: "group", id })}
+      />
+    )}
+    {projectsOpen && (
+      <ProjectsModal
+        projects={projects} conversations={conversations}
+        onClose={() => setProjectsOpen(false)}
+        onCreate={name => void createProject(name)}
+        onRename={(id, name) => void renameProject(id, name)}
+        onPin={p => void pinProject(p)}
+        onDelete={p => void removeProject(p)}
+        onPick={id => setListFilter({ kind: "project", id })}
+      />
+    )}
     {settingsOpen && (
       <SettingsModal theme={theme} onThemeChange={setTheme} onClose={() => setSettingsOpen(false)} />
     )}
