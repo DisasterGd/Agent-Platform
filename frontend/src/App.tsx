@@ -105,6 +105,19 @@ export default function App() {
   const activeIdRef = useRef<number | null>(null);
   activeIdRef.current = activeId;
 
+  // “回到底部”：聊天区滚动至非底部时出现
+  const chatRef = useRef<HTMLElement | null>(null);
+  const [showJumpBottom, setShowJumpBottom] = useState(false);
+  const updateJumpBottom = useCallback(() => {
+    const el = chatRef.current;
+    if (!el) { setShowJumpBottom(false); return; }
+    setShowJumpBottom(el.scrollHeight - el.scrollTop - el.clientHeight > 120);
+  }, []);
+  function jumpToBottom() {
+    const el = chatRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     try { localStorage.setItem("theme", theme); } catch { /* 忽略存储失败 */ }
@@ -338,6 +351,39 @@ export default function App() {
   /** 任务会话直接回到“任务”本体归类：清分组并清项目。 */
   function moveToTaskSection(c: Conversation) {
     void moveConv(c.id, { group_id: null, project_id: null });
+  }
+
+  /** 右键批量移动：同一规则逐个应用（移入一边即离开另一边），只刷新一次列表。 */
+  async function bulkMove(convs: Conversation[], kind: "project" | "group" | "out-project" | "out-group" | "task", id?: number | null) {
+    if (!convs.length) return;
+    setError("");
+    let failed = 0;
+    for (const c of convs) {
+      let patch: { project_id?: number | null; group_id?: number | null } | null = null;
+      if (kind === "project") patch = { project_id: id ?? null, ...(c.group_id != null ? { group_id: null } : {}) };
+      else if (kind === "group") patch = { group_id: id ?? null, ...(c.project_id != null ? { project_id: null } : {}) };
+      else if (kind === "out-project") patch = c.project_id != null ? { project_id: null } : null;
+      else if (kind === "out-group") patch = c.group_id != null ? { group_id: null } : null;
+      else if (kind === "task") patch = c.project_id != null || c.group_id != null ? { project_id: null, group_id: null } : null;
+      if (patch === null) continue;
+      try { await chatApi.updateConversation(c.id, patch); } catch { failed += 1; }
+    }
+    if (failed) setError(`${failed} 个会话移动失败`);
+    await refresh();
+  }
+
+  /** 右键批量新建分组并移入：按首个会话的类型决定 task 子分组 / 根级分组（同组条件已由菜单保证）。 */
+  async function createGroupForMany(convs: Conversation[], name: string) {
+    if (!convs.length) return;
+    const isTask = (convs[0].kind ?? "chat") === "task";
+    try {
+      setError("");
+      const g = await groupsApi.create(name, isTask ? "task" : "group");
+      setGroups(cur => [...cur, g]);
+      await bulkMove(convs, "group", g.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "分组创建失败");
+    }
   }
 
   /** 在“移至分组”菜单内新建分组并立刻移入：任务会话建 task 子分组，普通会话建根级分组。 */
@@ -700,6 +746,8 @@ export default function App() {
   }
 
   const turns = buildTurns(messages);
+  // 消息增减/切换会话后重算“回到底部”显隐（流式增长时若已离底应保持显示）
+  useEffect(() => { updateJumpBottom(); }, [turns.length, activeId, mode, updateJumpBottom]);
   const questions = turns.filter(t => t.role === "user" && t.items[t.items.length - 1].content.trim());
   const activeConv = conversations.find(c => c.id === activeId);
   const lastUserTurn = [...turns].reverse().find(t => t.role === "user");
@@ -722,6 +770,8 @@ export default function App() {
       onMoveGroup={moveToGroup}
       onMoveToTaskSection={moveToTaskSection}
       onCreateGroupFor={(c, name) => void createGroupFor(c, name)}
+      onBulkMove={(convs, kind, id) => void bulkMove(convs, kind, id)}
+      onCreateGroupForMany={(convs, name) => void createGroupForMany(convs, name)}
       onBulkDelete={ids => void bulkDelete(ids)}
       onBulkPin={(ids, pinned) => void bulkPin(ids, pinned)}
       onSetFilter={setListFilter}
@@ -743,7 +793,7 @@ export default function App() {
         </div>
         <div className="topbar-meta">
           <span className="meta-item">模型 <b>DeepSeek</b></span>
-          <span className="meta-item">v0.4.2</span>
+          <span className="meta-item">v0.4.3</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
@@ -767,7 +817,7 @@ export default function App() {
           </aside>
         )}
 
-        <section className="chat-area">
+        <section className="chat-area" ref={chatRef} onScroll={updateJumpBottom}>
           {turns.length === 0
             ? <div className="welcome">
                 <div className="welcome-mark">◉</div>
@@ -869,6 +919,14 @@ export default function App() {
                 );
               })}</div>}
         </section>
+
+        {showJumpBottom && turns.length > 0 && (
+          <button type="button" className="jump-bottom" aria-label="回到底部" title="回到底部" onClick={jumpToBottom}>
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M8 2.6v9.2M4 8.6l4 4 4-4" />
+            </svg>
+          </button>
+        )}
 
         <div className="composer-wrap">
           <ThinkingTicker tracker={thinking} />

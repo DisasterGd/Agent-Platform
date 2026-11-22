@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { Conversation, ConvGroup, Project } from "../types/chat";
 
 /** 列表过滤：项目弹窗/搜索结果选定后把侧栏会话列表收拢到某个项目或分组。 */
@@ -26,6 +26,10 @@ interface Props {
   onMoveToTaskSection: (c: Conversation) => void;
   /** 在“移至分组”菜单内新建分组并立刻把会话移入（kind 按会话类型自动取 task/group）。 */
   onCreateGroupFor: (c: Conversation, name: string) => void;
+  /** 右键批量移动：对所有目标会话按同一规则改归属（kind 决定子分组类型）。 */
+  onBulkMove: (convs: Conversation[], kind: "project" | "group" | "out-project" | "out-group" | "task", id?: number | null) => void;
+  /** 右键批量：在当前（子）分组内新建分组并把所有目标移入。 */
+  onCreateGroupForMany: (convs: Conversation[], name: string) => void;
   onBulkDelete: (ids: number[]) => void;
   onBulkPin: (ids: number[], pinned: boolean) => void;
   onSetFilter: (f: ListFilter) => void;
@@ -43,6 +47,10 @@ function loadCollapsed(): Set<string> {
   } catch {
     return new Set();
   }
+}
+
+function byName(a: { name: string }, b: { name: string }) {
+  return a.name.localeCompare(b.name, "zh");
 }
 
 function SearchIcon() {
@@ -83,7 +91,7 @@ export default function Sidebar(props: Props) {
     conversations, projects, groups, activeId, generatingConvId, listFilter,
     onNewChat, onOpenSearch, onOpenProjects, onOpenConversation, onRename, onPin, onDelete,
     onMoveProject, onMoveGroup, onMoveToTaskSection, onCreateGroupFor,
-    onBulkDelete, onBulkPin, onSetFilter,
+    onBulkMove, onCreateGroupForMany, onBulkDelete, onBulkPin, onSetFilter,
     onCreateGroup, onRenameGroup, onDeleteGroup,
   } = props;
 
@@ -117,37 +125,48 @@ export default function Sidebar(props: Props) {
   const [subCreating, setSubCreating] = useState(false);
   const [subDraft, setSubDraft] = useState("");
 
-  const rootGroups = useMemo(() => groups.filter(g => g.kind !== "task"), [groups]);
-  const taskGroups = useMemo(() => groups.filter(g => g.kind === "task"), [groups]);
+  // 右键自定义菜单（多选批量操作）：targets 为操作对象，ctxSub 为“添加至项目/移至分组”的二级菜单
+  const [ctx, setCtx] = useState<{ targets: Conversation[]; top: number; left: number } | null>(null);
+  const [ctxSub, setCtxSub] = useState<{ type: "project" | "group"; top: number; left: number } | null>(null);
+  const [ctxCreating, setCtxCreating] = useState(false);
+  const [ctxDraft, setCtxDraft] = useState("");
+
+  const rootGroups = useMemo(() => groups.filter(g => g.kind !== "task").slice().sort(byName), [groups]);
+  const taskGroups = useMemo(() => groups.filter(g => g.kind === "task").slice().sort(byName), [groups]);
   const groupsMap = useMemo(() => new Map(groups.map(g => [g.id, g])), [groups]);
   const projectMap = useMemo(() => new Map(projects.map(p => [p.id, p])), [projects]);
 
   /** 归类（优先级）：任务子分组 → 根级分组 → 项目 → 任务 → 未分组；任务与普通会话互不混入。 */
+  const bucketKeyOf = useMemo(() => {
+    return (c: Conversation): string => {
+      const g = c.group_id != null ? groupsMap.get(c.group_id) : undefined;
+      if (g?.kind === "task") return `t:${g.id}`;
+      if (g) return `g:${g.id}`;
+      if (c.project_id) return `p:${c.project_id}`;
+      if (c.kind === "task") return "__taskbare";
+      return "none";
+    };
+  }, [groupsMap]);
+
   const buckets = useMemo(() => {
     const map = new Map<string, Conversation[]>();
-    const push = (k: string, c: Conversation) => {
+    for (const c of conversations) {
+      const k = bucketKeyOf(c);
       const arr = map.get(k);
       if (arr) arr.push(c);
       else map.set(k, [c]);
-    };
-    for (const c of conversations) {
-      const g = c.group_id != null ? groupsMap.get(c.group_id) : undefined;
-      if (g?.kind === "task") push(`t:${g.id}`, c);
-      else if (g) push(`g:${g.id}`, c);
-      else if (c.project_id) push(`p:${c.project_id}`, c);
-      else if (c.kind === "task") push("__taskbare", c);
-      else push("none", c);
     }
     return map;
-  }, [conversations, groupsMap]);
+  }, [conversations, bucketKeyOf]);
   const B = (k: string) => buckets.get(k) ?? [];
 
   const closeMenu = () => { setMenu(null); setSub(null); setSubCreating(false); setSubDraft(""); };
+  const closeCtx = () => { setCtx(null); setCtxSub(null); setCtxCreating(false); setCtxDraft(""); };
 
   // 菜单打开期间滚动/缩放视口先关闭，避免 fixed 菜单与行错位
   useEffect(() => {
-    if (!menu) return;
-    const close = () => closeMenu();
+    if (!menu && !ctx) return;
+    const close = () => { closeMenu(); closeCtx(); };
     window.addEventListener("scroll", close, true);
     window.addEventListener("resize", close);
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
@@ -157,7 +176,7 @@ export default function Sidebar(props: Props) {
       window.removeEventListener("resize", close);
       window.removeEventListener("keydown", onKey);
     };
-  }, [menu]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [menu, ctx]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function openMenu(c: Conversation, el: HTMLElement) {
     const rect = el.getBoundingClientRect();
@@ -171,6 +190,30 @@ export default function Sidebar(props: Props) {
     setSub({ type, top: rect.top - 4, left: Math.min(rect.right + 6, window.innerWidth - 236) });
     setSubCreating(false);
     setSubDraft("");
+  }
+
+  /** 右键：多选且命中已选 → 作用于全部选中；否则仅作用于该行（多选模式下把该行变为唯一选中）。阻止浏览器原生菜单。 */
+  function openCtx(c: Conversation, e: ReactMouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    let targets: Conversation[];
+    if (selectMode && selectedIds.has(c.id)) targets = conversations.filter(x => selectedIds.has(x.id));
+    else {
+      targets = [c];
+      if (selectMode) setSelectedIds(new Set([c.id]));
+    }
+    if (targets.length === 0) return;
+    const left = Math.min(e.clientX, window.innerWidth - 196);
+    const top = Math.min(e.clientY, window.innerHeight - 240);
+    setCtx({ targets, top, left });
+    setCtxSub(null);
+    setCtxCreating(false);
+    setCtxDraft("");
+  }
+
+  function openCtxSub(type: "project" | "group", el: HTMLElement) {
+    const rect = el.getBoundingClientRect();
+    setCtxSub({ type, top: rect.top - 4, left: Math.min(rect.right + 6, window.innerWidth - 236) });
   }
 
   function startEdit(c: Conversation) {
@@ -210,6 +253,7 @@ export default function Sidebar(props: Props) {
     setSelectMode(v => !v);
     setSelectedIds(new Set());
     closeMenu();
+    closeCtx();
   }
 
   const filterName = listFilter?.kind === "project"
@@ -221,8 +265,6 @@ export default function Sidebar(props: Props) {
   const flatList = listFilter
     ? conversations.filter(c => (listFilter.kind === "project" ? c.project_id === listFilter.id : c.group_id === listFilter.id))
     : null;
-
-  const visibleIds = flatList ? flatList.map(c => c.id) : conversations.map(c => c.id);
 
   // ---------- 行 ----------
 
@@ -239,7 +281,8 @@ export default function Sidebar(props: Props) {
           if (e.key === "Escape") { cancelRename.current = true; setEditingId(null); }
         }} />
     ) : (
-      <div key={c.id} className={`conv-item ${activeId === c.id ? "selected" : ""} ${selectMode && selectedIds.has(c.id) ? "checked" : ""}`}>
+      <div key={c.id} className={`conv-item ${activeId === c.id ? "selected" : ""} ${selectMode && selectedIds.has(c.id) ? "checked" : ""}`}
+        onContextMenu={e => openCtx(c, e)}>
         {selectMode && (
           <input type="checkbox" className="conv-check" checked={selectedIds.has(c.id)}
             onChange={() => toggleSelect(c.id)} aria-label={`选择会话 ${c.title}`} />
@@ -320,7 +363,7 @@ export default function Sidebar(props: Props) {
               onClick={e => { e.stopPropagation(); setGroupMenuKey(groupMenuKey === `g${group.id}` ? null : `g${group.id}`); }}>⋯</button>
             {groupMenuKey === `g${group.id}` && (
               <>
-                <div className="menu-scrim" onClick={() => setGroupMenuKey(null)} />
+                <div className="menu-scrim" onClick={() => setGroupMenuKey(null)} onContextMenu={e => { e.preventDefault(); setGroupMenuKey(null); }} />
                 <div className="conv-menu sec-menu">
                   {renderGroupMenu(group)}
                 </div>
@@ -382,9 +425,12 @@ export default function Sidebar(props: Props) {
     );
   }
 
-  const projectConvs = [...buckets.keys()].filter(k => k.startsWith("p:")).flatMap(k => B(k));
+  const projectKeys = [...buckets.keys()].filter(k => k.startsWith("p:"));
+  const projectConvs = projectKeys.flatMap(k => B(k));
   const taskBare = B("__taskbare");
   const taskConvsAll = [...taskBare, ...taskGroups.flatMap(g => B(`t:${g.id}`))];
+  // 项目子组别按名称排序（projects 已按置顶/更新时间排；此处按名称给子组别稳定顺序）
+  const sortedProjectIds = projects.filter(p => B(`p:${p.id}`).length > 0).map(p => p.id);
 
   // ---------- “移至分组”子菜单的可选目标（任务/普通不混用） ----------
 
@@ -394,14 +440,25 @@ export default function Sidebar(props: Props) {
   const projectLabel = menuConv?.project_id != null ? "更换项目" : "添加至项目";
   const groupLabel = menuConv?.group_id != null ? "更换分组" : "移至分组";
 
+  // 右键批量菜单的目标与“添加至项目 / 移至分组”显示条件：所有目标同(子)分组且同种类
+  const ctxTargets = ctx?.targets ?? [];
+  const ctxIds = ctxTargets.map(t => t.id);
+  const ctxCanMove = ctxTargets.length > 0
+    && ctxTargets.every(t => bucketKeyOf(t) === bucketKeyOf(ctxTargets[0]))
+    && ctxTargets.every(t => (t.kind ?? "chat") === (ctxTargets[0].kind ?? "chat"));
+  const ctxIsTask = (ctxTargets[0]?.kind ?? "chat") === "task";
+  const ctxGroupTargets = ctxIsTask ? taskGroups : rootGroups;
+  const ctxSameProject = ctxCanMove ? ctxTargets[0].project_id ?? null : null;
+  const ctxSameGroup = ctxCanMove ? ctxTargets[0].group_id ?? null : null;
+
   return <aside className="sidebar">
     <div className="brand"><b className="mark">◉</b><div className="brand-word"><strong>Agent</strong><span>工作台</span></div></div>
-    <button className="new" onClick={() => { closeMenu(); onNewChat(); }}>新聊天</button>
+    <button className="new" onClick={() => { closeMenu(); closeCtx(); onNewChat(); }}>新聊天</button>
     <div className="side-actions">
-      <button type="button" className="side-action" onClick={() => { closeMenu(); onOpenSearch(); }}>
+      <button type="button" className="side-action" onClick={() => { closeMenu(); closeCtx(); onOpenSearch(); }}>
         <SearchIcon /><span>搜索</span>
       </button>
-      <button type="button" className="side-action" onClick={() => { closeMenu(); onOpenProjects(); }}>
+      <button type="button" className="side-action" onClick={() => { closeMenu(); closeCtx(); onOpenProjects(); }}>
         <FolderIcon /><span>项目</span>
         {projects.length > 0 && <em className="side-action-count">{projects.length}</em>}
       </button>
@@ -418,15 +475,10 @@ export default function Sidebar(props: Props) {
       </div>
     </div>
     {selectMode && (
-      <div className="conv-bulk-bar">
-        <button type="button"
-          onClick={() => setSelectedIds(cur => (cur.size ? new Set() : new Set(visibleIds)))}>
-          {selectedIds.size > 0 && selectedIds.size === visibleIds.length ? "取消全选" : "全选"}
-        </button>
+      <div className="conv-bulk-bar slim">
         <em>已选 {selectedIds.size}</em>
-        <button type="button" disabled={!selectedIds.size} onClick={() => { onBulkPin([...selectedIds], true); setSelectedIds(new Set()); }}>置顶</button>
-        <button type="button" disabled={!selectedIds.size} onClick={() => { onBulkPin([...selectedIds], false); setSelectedIds(new Set()); }}>取消置顶</button>
-        <button type="button" className="danger" disabled={!selectedIds.size} onClick={() => { onBulkDelete([...selectedIds]); setSelectedIds(new Set()); }}>删除</button>
+        <button type="button" disabled={!selectedIds.size} onClick={() => setSelectedIds(new Set())}>清空</button>
+        <span className="bulk-hint">右键选中项可批量操作</span>
       </div>
     )}
 
@@ -455,10 +507,10 @@ export default function Sidebar(props: Props) {
         </>
       ) : (
         <>
-          {rootGroups.map(g => renderPlainSection(`g:${g.id}`, g.name, B(`g:${g.id}`), g))}
+          {/* 默认区固定顺序：项目 → 任务 → …自定义分组(A~Z)… → 未分组（自定义分组插在任务与未分组之间） */}
           {projectConvs.length > 0 && renderParentSection(
             "__project", "项目", projectConvs,
-            [...new Set(projectConvs.map(c => c.project_id))].map(pid => renderProjectSubgroup(pid!)),
+            sortedProjectIds.map(pid => renderProjectSubgroup(pid)),
           )}
           {(taskConvsAll.length > 0 || taskGroups.length > 0) && renderParentSection(
             "__task", "任务", taskConvsAll,
@@ -467,6 +519,7 @@ export default function Sidebar(props: Props) {
               {taskGroups.map(g => renderTaskSubgroup(g))}
             </>,
           )}
+          {rootGroups.map(g => renderPlainSection(`g:${g.id}`, g.name, B(`g:${g.id}`), g))}
           {renderPlainSection("none", "未分组", B("none"))}
         </>
       )}
@@ -475,7 +528,7 @@ export default function Sidebar(props: Props) {
     {/* 会话“⋯”菜单：fixed 定位，可越出侧栏，不再被裁切 */}
     {menu && menuConv && (
       <>
-        <div className="menu-scrim" onClick={closeMenu} />
+        <div className="menu-scrim" onClick={closeMenu} onContextMenu={e => { e.preventDefault(); closeMenu(); }} />
         <div className="conv-menu fixed" style={{ top: menu.top, right: menu.right }}>
           <button type="button" onClick={() => { closeMenu(); startEdit(menuConv); }}>重命名</button>
           <button type="button" onClick={() => { closeMenu(); onPin(menuConv); }}>{menuConv.pinned ? "取消置顶" : "置顶"}</button>
@@ -512,7 +565,6 @@ export default function Sidebar(props: Props) {
                 {g.name}{menuConv.group_id === g.id && " ✓"}
               </button>
             ))}
-            {/* 任务会话可从“项目/子分组”直接回到“任务”本体归类；普通会话无此选项 */}
             {menuIsTask && (menuConv.group_id != null || menuConv.project_id != null) && (
               <button type="button" onClick={() => { closeMenu(); onMoveToTaskSection(menuConv); }}>任务（直接归类）</button>
             )}
@@ -534,6 +586,85 @@ export default function Sidebar(props: Props) {
                 }} />
             ) : (
               <button type="button" className="sub-new" onClick={() => setSubCreating(true)}>＋ 新建分组</button>
+            )}
+          </div>
+        )}
+      </>
+    )}
+
+    {/* 右键批量菜单（自定义，屏蔽浏览器原生菜单） */}
+    {ctx && ctxTargets.length > 0 && (
+      <>
+        <div className="menu-scrim" onClick={closeCtx} onContextMenu={e => { e.preventDefault(); closeCtx(); }} />
+        <div className="conv-menu fixed" style={{ top: ctx.top, left: ctx.left, right: "auto" }}>
+          <div className="ctx-title">{ctxIds.length > 1 ? `已选 ${ctxIds.length} 项` : ctxTargets[0].title}</div>
+          <button type="button" onClick={() => { closeCtx(); onBulkPin(ctxIds, true); }}>置顶</button>
+          <button type="button" onClick={() => { closeCtx(); onBulkPin(ctxIds, false); }}>取消置顶</button>
+          {ctxCanMove && (
+            <button type="button" className={ctxSub?.type === "project" ? "open" : ""}
+              onMouseEnter={e => openCtxSub("project", e.currentTarget)}
+              onClick={e => openCtxSub("project", e.currentTarget)}>
+              {ctxSameProject != null ? "更换项目" : "添加至项目"}
+            </button>
+          )}
+          {ctxCanMove && (
+            <button type="button" className={ctxSub?.type === "group" ? "open" : ""}
+              onMouseEnter={e => openCtxSub("group", e.currentTarget)}
+              onClick={e => openCtxSub("group", e.currentTarget)}>
+              {ctxSameGroup != null ? "更换分组" : "移至分组"}
+            </button>
+          )}
+          <button type="button" className="danger" onClick={() => { closeCtx(); onBulkDelete(ctxIds); }}>删除</button>
+          {ctxIds.length > 1 && !ctxCanMove && (
+            <div className="ctx-note">仅当所选在同一分组时可批量移动</div>
+          )}
+        </div>
+        {ctxSub?.type === "project" && (
+          <div className="conv-submenu fixed" style={{ top: ctxSub.top, left: ctxSub.left }}>
+            {projects.length === 0 && <span className="sub-empty">暂无项目</span>}
+            {projects.map(p => (
+              <button key={p.id} type="button" className={ctxSameProject === p.id ? "cur" : ""}
+                onClick={() => { closeCtx(); if (ctxSameProject !== p.id) onBulkMove(ctxTargets, "project", p.id); }}>
+                {p.pinned && "📌"}{p.name}{ctxSameProject === p.id && " ✓"}
+              </button>
+            ))}
+            {ctxSameProject != null && (
+              <button type="button" onClick={() => { closeCtx(); onBulkMove(ctxTargets, "out-project"); }}>从项目中移除</button>
+            )}
+          </div>
+        )}
+        {ctxSub?.type === "group" && (
+          <div className="conv-submenu fixed" style={{ top: ctxSub.top, left: ctxSub.left }}>
+            {ctxGroupTargets.length === 0 && (
+              <span className="sub-empty">{ctxIsTask ? "暂无任务子分组，可在下方新建" : "暂无自定义分组，可在下方新建"}</span>
+            )}
+            {ctxGroupTargets.map(g => (
+              <button key={g.id} type="button" className={ctxSameGroup === g.id ? "cur" : ""}
+                onClick={() => { closeCtx(); if (ctxSameGroup !== g.id) onBulkMove(ctxTargets, "group", g.id); }}>
+                {g.name}{ctxSameGroup === g.id && " ✓"}
+              </button>
+            ))}
+            {ctxIsTask && ctxCanMove && (ctxSameGroup != null || ctxSameProject != null) && (
+              <button type="button" onClick={() => { closeCtx(); onBulkMove(ctxTargets, "task"); }}>任务（直接归类）</button>
+            )}
+            {ctxSameGroup != null && (
+              <button type="button" onClick={() => { closeCtx(); onBulkMove(ctxTargets, "out-group"); }}>移出分组</button>
+            )}
+            <div className="sub-sep" />
+            {ctxCreating ? (
+              <input className="sub-input" autoFocus placeholder={ctxIsTask ? "子分组名，Enter 创建并移入" : "分组名，Enter 创建并移入"}
+                value={ctxDraft} onChange={e => setCtxDraft(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    const name = ctxDraft.trim();
+                    closeCtx();
+                    if (name) onCreateGroupForMany(ctxTargets, name);
+                  }
+                  if (e.key === "Escape") setCtxCreating(false);
+                }} />
+            ) : (
+              <button type="button" className="sub-new" onClick={() => setCtxCreating(true)}>＋ 新建分组</button>
             )}
           </div>
         )}

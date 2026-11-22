@@ -488,6 +488,15 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
 .task-welcome p b{color:var(--ink);font-weight:600}
 .task-composer-wrap{width:min(720px,calc(100% - 56px));margin:0 auto;padding-bottom:20px;flex:none}
 
+/* ===== v0.4.2 右键批量菜单 · 精简多选条 · 回到底部 ===== */
+.conv-bulk-bar.slim{padding:6px 9px}
+.bulk-hint{flex:1;min-width:0;text-align:right;color:var(--ink-faint);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ctx-title{padding:5px 10px 6px;font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--ink-faint);border-bottom:1px solid var(--line);margin:0 2px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:172px}
+.ctx-note{padding:6px 10px 2px;font-size:10px;color:var(--ink-faint);border-top:1px dashed var(--line);margin-top:3px;line-height:1.5}
+.jump-bottom{position:absolute;left:50%;transform:translateX(-50%);bottom:176px;z-index:6;width:38px;height:38px;display:grid;place-items:center;border:1px solid var(--line-strong);border-radius:50%;background:var(--paper-raised);color:var(--ink);box-shadow:0 4px 14px rgba(0,0,0,.14);transition:color .15s,border-color .15s,scale .15s}
+.jump-bottom:hover{border-color:var(--signal);color:var(--signal);scale:1.06}
+.jump-bottom:active{scale:.97}
+
 /* ===== v0.4 设置：选项卡与记忆面板 ===== */
 .modal-tabs{display:flex;gap:0;border-bottom:1px solid var(--line);flex:none}
 .modal-tabs button{border:0;border-bottom:2px solid transparent;background:transparent;color:var(--ink-faint);font-size:13px;padding:10px 16px;margin-bottom:-1px}
