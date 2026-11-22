@@ -24,7 +24,9 @@ from agent_platform.memory.manager import MemoryManager
 from agent_platform.models.base import ChatMessage, ImagePart
 from agent_platform.models.factory import create_model, create_vision_model
 from agent_platform.repositories.conversations import ConversationRepository
+from agent_platform.repositories.groups import GroupRepository
 from agent_platform.repositories.messages import MessageRepository
+from agent_platform.repositories.projects import ProjectRepository
 from agent_platform.tools.builtin.registry import build_default_registry
 from agent_platform.tools.registry import ToolRegistry
 
@@ -36,6 +38,9 @@ TITLE_SYSTEM_PROMPT = (
 VISION_PROMPT = "请用简洁的中文描述这张图片的内容。"
 
 PROVISIONAL_TITLE_LIMIT = 20
+
+# update_conversation 的“未传该字段”哨兵（None 表示显式移出项目/分组）
+UNSET = object()
 
 
 def provisional_title(content: str) -> str:
@@ -49,6 +54,9 @@ class ChatService:
         self.db = db
         self.conversations = ConversationRepository(db)
         self.messages = MessageRepository(db)
+        # v0.4.1：会话移动（添加至项目/分组）时校验归属
+        self.projects = ProjectRepository(db)
+        self.groups = GroupRepository(db)
         self.model = create_model()
         self.tools: ToolRegistry = build_default_registry()
         # v0.4：会话压缩 + 长期记忆注入/提炼的统一入口
@@ -79,10 +87,28 @@ class ChatService:
         conversation_id: int,
         title: str | None = None,
         pinned: bool | None = None,
+        project_id: object = UNSET,
+        group_id: object = UNSET,
     ) -> Conversation | None:
+        """会话编辑；project_id / group_id 只有显式传入（含 None=移出）才修改归属。"""
         if title is not None:
             title = title.strip() or None
-        return self.conversations.update(conversation_id, title=title, pinned=pinned)
+        conversation = self.conversations.update(conversation_id, title=title, pinned=pinned)
+        if conversation is None:
+            return None
+        if project_id is not UNSET:
+            if project_id is not None:
+                project = self.projects.get(int(project_id))
+                if project is None or project.user_id != conversation.user_id:
+                    raise ValueError("项目不存在")
+            self.conversations.set_project(conversation_id, project_id)  # type: ignore[arg-type]
+        if group_id is not UNSET:
+            if group_id is not None:
+                group = self.groups.get(int(group_id))
+                if group is None or group.user_id != conversation.user_id:
+                    raise ValueError("分组不存在")
+            self.conversations.set_group(conversation_id, group_id)  # type: ignore[arg-type]
+        return self.conversations.get(conversation_id)
 
     def delete_conversation(self, conversation_id: int) -> bool:
         return self.conversations.delete(conversation_id)

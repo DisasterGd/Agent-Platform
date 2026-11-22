@@ -1,10 +1,11 @@
 """任务接口（v0.3 任务规划与执行）。
 
-POST /tasks               创建任务（模型生成计划，状态 awaiting_approval）
+POST /tasks               创建任务（模型生成计划，状态 awaiting_approval；可带项目归属）
 PUT  /tasks/{id}/steps    审阅阶段编辑计划
 POST /tasks/{id}/cancel   取消任务
 POST /tasks/{id}/execute  SSE 流式执行（plan_created/step_*/text_delta/task_completed）
-GET  /tasks?conversation_id= / GET /tasks/{id}   查询
+GET  /tasks               v0.4.1 任务界面：全部任务；?conversation_id= 限定会话
+GET  /tasks/{id}          查询单个任务
 """
 from __future__ import annotations
 
@@ -51,6 +52,7 @@ class TaskOut(BaseModel):
 class CreateTaskIn(BaseModel):
     goal: str
     conversation_id: int | None = None
+    project_id: int | None = None  # v0.4.1 任务界面直接建任务时的项目归属
 
 
 class StepIn(BaseModel):
@@ -77,7 +79,7 @@ async def create_task(
 ):
     if not body.goal.strip():
         raise HTTPException(status_code=400, detail="任务目标不能为空")
-    return await TaskService(db).create_task(user_id, body.goal, body.conversation_id)
+    return await TaskService(db).create_task(user_id, body.goal, body.conversation_id, body.project_id)
 
 
 @router.get("/tasks", response_model=list[TaskOut])
@@ -86,10 +88,11 @@ def list_tasks(
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
+    """缺省返回该用户全部任务（v0.4.1 任务界面）；带 conversation_id 时只看该会话。"""
     service = TaskService(db)
     if conversation_id is not None:
         return service.list_by_conversation(conversation_id, user_id)
-    return []
+    return service.list_all(user_id)
 
 
 @router.get("/tasks/{task_id}", response_model=TaskOut)
@@ -125,6 +128,17 @@ def cancel_task(
     service = TaskService(db)
     _get_owned_task(service, task_id, user_id)
     return service.cancel(task_id, user_id)
+
+
+@router.delete("/tasks/{task_id}", status_code=204)
+def delete_task(
+    task_id: int,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """删除任务记录（不影响已产生的会话）。"""
+    if not TaskService(db).delete(task_id, user_id):
+        raise HTTPException(status_code=404, detail="任务不存在")
 
 
 @router.post("/tasks/{task_id}/execute")

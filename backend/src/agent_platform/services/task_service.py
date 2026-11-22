@@ -44,12 +44,17 @@ class TaskService:
         self.chat = ChatService(db)
 
     async def create_task(
-        self, user_id: int, goal: str, conversation_id: int | None = None
+        self,
+        user_id: int,
+        goal: str,
+        conversation_id: int | None = None,
+        project_id: int | None = None,
     ) -> Task:
         goal = goal.strip()
-        # 任务继承所属会话的项目（v0.4 项目记忆按此检索注入）
+        # 项目归属：优先继承所属会话；任务界面直接建任务时用显式传入的 project_id
         conversation = self.conversations.get(conversation_id) if conversation_id else None
-        project_id = conversation.project_id if conversation else None
+        if conversation is not None and conversation.user_id == user_id:
+            project_id = conversation.project_id
         task = self.tasks.create(user_id, goal, conversation_id, project_id)
         steps = await self.planner.plan(goal)
         self.tasks.replace_steps(task.id, [{"title": s.title, "detail": s.detail} for s in steps])
@@ -60,6 +65,10 @@ class TaskService:
         if task is None or task.user_id != user_id:
             return None
         return task
+
+    def list_all(self, user_id: int) -> list[Task]:
+        """v0.4.1 任务界面：全部任务（含尚未绑定会话的待审阅任务）。"""
+        return self.tasks.list_by_user(user_id)
 
     def list_by_conversation(self, conversation_id: int, user_id: int) -> list[Task]:
         return [t for t in self.tasks.list_by_conversation(conversation_id) if t.user_id == user_id]
@@ -86,6 +95,12 @@ class TaskService:
         if task.status in ("awaiting_approval", "running"):
             self.tasks.set_status(task_id, "cancelled")
         return self.tasks.get(task_id)
+
+    def delete(self, task_id: int, user_id: int) -> bool:
+        """删除任务记录（v0.4.1 任务界面）；不影响任务已产生的会话与消息。"""
+        if self.get_task(task_id, user_id) is None:
+            return False
+        return self.tasks.delete(task_id)
 
     async def execute(self, task_id: int, user_id: int) -> AsyncIterator[Event]:
         task = self.get_task(task_id, user_id)
@@ -186,12 +201,12 @@ class TaskService:
         return "\n".join(parts).strip()
 
     def _ensure_conversation(self, task: Task) -> Conversation:
-        """执行开始时确保任务绑定一个有效会话；没有就立刻新建（生成阶段即建会话）。"""
+        """执行开始时确保任务绑定一个有效会话；没有就立刻新建（生成阶段即建会话，沿用任务的项目归属）。"""
         conversation: Conversation | None = (
             self.conversations.get(task.conversation_id) if task.conversation_id else None
         )
         if conversation is None or conversation.user_id != task.user_id:
-            conversation = self.conversations.create(task.user_id, "新会话")
+            conversation = self.conversations.create(task.user_id, "新会话", project_id=task.project_id)
             self.tasks.set_conversation(task.id, conversation.id)
         return conversation
 

@@ -21,6 +21,9 @@ class ConversationOut(BaseModel):
     title: str
     pinned: bool
     project_id: int | None = None
+    group_id: int | None = None
+    # v0.4.1 默认分组归类：task=任务模式相关会话（由任务表派生），chat=普通会话
+    kind: str = "chat"
     created_at: datetime
     updated_at: datetime
 
@@ -33,6 +36,9 @@ class CreateConversationIn(BaseModel):
 class UpdateConversationIn(BaseModel):
     title: str | None = None
     pinned: bool | None = None
+    # v0.4.1：显式传 null 表示“移出项目 / 移出分组”（model_fields_set 区分未传与传 null）
+    project_id: int | None = None
+    group_id: int | None = None
 
 
 class MessageOut(BaseModel):
@@ -94,7 +100,18 @@ def update_conversation(
     body: UpdateConversationIn,
     db: Session = Depends(get_db),
 ):
-    conversation = ChatService(db).update_conversation(conversation_id, body.title, body.pinned)
+    # 只有请求里显式出现的 project_id / group_id 才会改归属（null=移出）
+    move_kwargs: dict = {}
+    if "project_id" in body.model_fields_set:
+        move_kwargs["project_id"] = body.project_id
+    if "group_id" in body.model_fields_set:
+        move_kwargs["group_id"] = body.group_id
+    try:
+        conversation = ChatService(db).update_conversation(
+            conversation_id, body.title, body.pinned, **move_kwargs
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if conversation is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     return conversation
