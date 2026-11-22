@@ -14,11 +14,13 @@ export interface Conversation {
   updated_at: string;
 }
 
-/** v0.4.1 用户自定义会话分组（默认分组不建记录，由代码归类）。 */
+/** v0.4.1 用户自定义会话分组（默认分组不建记录，由代码归类）。
+ * kind: group=根级自定义分组；task=“任务”分区下的子分组（仅任务会话可归入）。 */
 export interface ConvGroup {
   id: number;
   user_id: number;
   name: string;
+  kind?: "group" | "task";
   created_at: string;
   updated_at: string;
 }

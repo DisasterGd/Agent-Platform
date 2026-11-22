@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Conversation, ConvGroup, Project } from "../types/chat";
 
 /** 列表过滤：项目弹窗/搜索结果选定后把侧栏会话列表收拢到某个项目或分组。 */
@@ -18,28 +18,20 @@ interface Props {
   onRename: (id: number, title: string) => void;
   onPin: (c: Conversation) => void;
   onDelete: (c: Conversation) => void;
-  onMoveProject: (id: number, projectId: number | null) => void;
-  onMoveGroup: (id: number, groupId: number | null) => void;
+  /** 添加至/更换项目：移入项目时同时离开自定义分组（归类互斥，项目优先呈现）。 */
+  onMoveProject: (c: Conversation, projectId: number | null) => void;
+  /** 移至/更换分组：移入分组时同时离开项目；任务会话只应进入任务子分组。 */
+  onMoveGroup: (c: Conversation, groupId: number | null) => void;
+  /** 任务会话直接归入“任务”：清分组并清项目。 */
+  onMoveToTaskSection: (c: Conversation) => void;
+  /** 在“移至分组”菜单内新建分组并立刻把会话移入（kind 按会话类型自动取 task/group）。 */
+  onCreateGroupFor: (c: Conversation, name: string) => void;
   onBulkDelete: (ids: number[]) => void;
   onBulkPin: (ids: number[], pinned: boolean) => void;
   onSetFilter: (f: ListFilter) => void;
   onCreateGroup: (name: string) => void;
   onRenameGroup: (id: number, name: string) => void;
   onDeleteGroup: (g: ConvGroup) => void;
-}
-
-const DEFAULT_SECTIONS = [
-  { key: "__project", label: "项目" },
-  { key: "__task", label: "任务" },
-  { key: "__none", label: "未分组" },
-] as const;
-
-/** 默认分组归类（优先级）：自定义分组 > 项目 > 任务（任务模式会话）> 未分组。 */
-function bucketKey(c: Conversation, groupIds: Set<number>): string {
-  if (c.group_id != null && groupIds.has(c.group_id)) return `g:${c.group_id}`;
-  if (c.project_id) return "__project";
-  if (c.kind === "task") return "__task";
-  return "__none";
 }
 
 const collapsedStore = "sidebar.collapsedSections";
@@ -70,19 +62,34 @@ function FolderIcon() {
   );
 }
 
+/** 分区头部的“全选”复选框（多选模式下出现；部分选中时显示为半选）。 */
+function SelBox({ ids, selected, onToggle, label }: {
+  ids: number[]; selected: Set<number>; onToggle: () => void; label: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  const all = ids.length > 0 && ids.every(i => selected.has(i));
+  const some = ids.some(i => selected.has(i));
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = some && !all;
+  }, [some, all]);
+  return (
+    <input ref={ref} type="checkbox" className="sec-check" checked={all}
+      onChange={onToggle} onClick={e => e.stopPropagation()} aria-label={`全选${label}`} />
+  );
+}
+
 export default function Sidebar(props: Props) {
   const {
     conversations, projects, groups, activeId, generatingConvId, listFilter,
     onNewChat, onOpenSearch, onOpenProjects, onOpenConversation, onRename, onPin, onDelete,
-    onMoveProject, onMoveGroup, onBulkDelete, onBulkPin, onSetFilter,
+    onMoveProject, onMoveGroup, onMoveToTaskSection, onCreateGroupFor,
+    onBulkDelete, onBulkPin, onSetFilter,
     onCreateGroup, onRenameGroup, onDeleteGroup,
   } = props;
 
-  const [menuFor, setMenuFor] = useState<number | null>(null);
-  const [subMenu, setSubMenu] = useState<"project" | "group" | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
-  const cancelRename = { current: false };
+  const cancelRename = useRef(false);
 
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -102,11 +109,69 @@ export default function Sidebar(props: Props) {
   const [draftGroup, setDraftGroup] = useState("");
   const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
   const [draftGroupName, setDraftGroupName] = useState("");
-  const [groupMenuFor, setGroupMenuFor] = useState<number | null>(null);
+  const [groupMenuKey, setGroupMenuKey] = useState<string | null>(null);
 
-  const groupIds = useMemo(() => new Set(groups.map(g => g.id)), [groups]);
+  // “⋯”菜单与子菜单用 fixed 定位（按按钮 rect），不再被侧栏 overflow 裁掉
+  const [menu, setMenu] = useState<{ c: Conversation; top: number; right: number } | null>(null);
+  const [sub, setSub] = useState<{ type: "project" | "group"; top: number; left: number } | null>(null);
+  const [subCreating, setSubCreating] = useState(false);
+  const [subDraft, setSubDraft] = useState("");
 
-  const closeMenu = () => { setMenuFor(null); setSubMenu(null); };
+  const rootGroups = useMemo(() => groups.filter(g => g.kind !== "task"), [groups]);
+  const taskGroups = useMemo(() => groups.filter(g => g.kind === "task"), [groups]);
+  const groupsMap = useMemo(() => new Map(groups.map(g => [g.id, g])), [groups]);
+  const projectMap = useMemo(() => new Map(projects.map(p => [p.id, p])), [projects]);
+
+  /** 归类（优先级）：任务子分组 → 根级分组 → 项目 → 任务 → 未分组；任务与普通会话互不混入。 */
+  const buckets = useMemo(() => {
+    const map = new Map<string, Conversation[]>();
+    const push = (k: string, c: Conversation) => {
+      const arr = map.get(k);
+      if (arr) arr.push(c);
+      else map.set(k, [c]);
+    };
+    for (const c of conversations) {
+      const g = c.group_id != null ? groupsMap.get(c.group_id) : undefined;
+      if (g?.kind === "task") push(`t:${g.id}`, c);
+      else if (g) push(`g:${g.id}`, c);
+      else if (c.project_id) push(`p:${c.project_id}`, c);
+      else if (c.kind === "task") push("__taskbare", c);
+      else push("none", c);
+    }
+    return map;
+  }, [conversations, groupsMap]);
+  const B = (k: string) => buckets.get(k) ?? [];
+
+  const closeMenu = () => { setMenu(null); setSub(null); setSubCreating(false); setSubDraft(""); };
+
+  // 菜单打开期间滚动/缩放视口先关闭，避免 fixed 菜单与行错位
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => closeMenu();
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function openMenu(c: Conversation, el: HTMLElement) {
+    const rect = el.getBoundingClientRect();
+    setMenu({ c, top: rect.bottom + 4, right: Math.max(8, window.innerWidth - rect.right) });
+    setSub(null);
+    setSubCreating(false);
+  }
+
+  function openSub(type: "project" | "group", el: HTMLElement) {
+    const rect = el.getBoundingClientRect();
+    setSub({ type, top: rect.top - 4, left: Math.min(rect.right + 6, window.innerWidth - 236) });
+    setSubCreating(false);
+    setSubDraft("");
+  }
 
   function startEdit(c: Conversation) {
     cancelRename.current = false;
@@ -131,47 +196,40 @@ export default function Sidebar(props: Props) {
     });
   }
 
+  function toggleIds(ids: number[]) {
+    setSelectedIds(cur => {
+      const n = new Set(cur);
+      const allSelected = ids.length > 0 && ids.every(i => n.has(i));
+      if (allSelected) ids.forEach(i => n.delete(i));
+      else ids.forEach(i => n.add(i));
+      return n;
+    });
+  }
+
   function toggleSelectMode() {
     setSelectMode(v => !v);
     setSelectedIds(new Set());
     closeMenu();
   }
 
-  // —— 分区计算 ——
-  const buckets = useMemo(() => {
-    const map = new Map<string, Conversation[]>();
-    for (const c of conversations) {
-      const k = bucketKey(c, groupIds);
-      const arr = map.get(k);
-      if (arr) arr.push(c);
-      else map.set(k, [c]);
-    }
-    return map;
-  }, [conversations, groupIds]);
-
   const filterName = listFilter?.kind === "project"
-    ? projects.find(p => p.id === listFilter.id)?.name
+    ? projectMap.get(listFilter.id)?.name
     : listFilter?.kind === "group"
-      ? groups.find(g => g.id === listFilter.id)?.name
+      ? groupsMap.get(listFilter.id)?.name
       : null;
 
   const flatList = listFilter
     ? conversations.filter(c => (listFilter.kind === "project" ? c.project_id === listFilter.id : c.group_id === listFilter.id))
     : null;
 
-  const sections = listFilter
-    ? []
-    : [
-        ...groups.map(g => ({ key: `g:${g.id}`, label: g.name, group: g, locked: false as const })),
-        ...DEFAULT_SECTIONS.map(s => ({ key: s.key, label: s.label, group: null, locked: true as const })),
-      ];
+  const visibleIds = flatList ? flatList.map(c => c.id) : conversations.map(c => c.id);
 
-  const visibleIds = flatList ? flatList.map(c => c.id) : sections.flatMap(s => buckets.get(s.key) ?? []).map(c => c.id);
+  // ---------- 行 ----------
 
   function renderRow(c: Conversation, sectionKey: string) {
-    const projectName = c.project_id ? projects.find(p => p.id === c.project_id)?.name : null;
-    const taskTag = c.kind === "task" && sectionKey !== "__task";
-    const projTag = sectionKey === "__project" && projectName;
+    const projectName = c.project_id != null ? projectMap.get(c.project_id)?.name : null;
+    const showProjTag = !sectionKey.startsWith("p:") && listFilter?.kind !== "project" && projectName;
+    const showTaskTag = !sectionKey.startsWith("t:") && sectionKey !== "__taskbare" && c.kind === "task";
     return editingId === c.id ? (
       <input key={c.id} className="rename-input" autoFocus value={draftTitle}
         onChange={e => setDraftTitle(e.target.value)}
@@ -186,8 +244,8 @@ export default function Sidebar(props: Props) {
           <input type="checkbox" className="conv-check" checked={selectedIds.has(c.id)}
             onChange={() => toggleSelect(c.id)} aria-label={`选择会话 ${c.title}`} />
         )}
-        {projTag && <span className="conv-tag" title={projectName ?? ""}>{projectName}</span>}
-        {!projTag && taskTag && <span className="conv-tag" title="任务模式相关会话">任务</span>}
+        {showProjTag && <span className="conv-tag" title={projectName ?? ""}>{projectName}</span>}
+        {!showProjTag && showTaskTag && <span className="conv-tag" title="任务模式相关会话">任务</span>}
         <button className="conv-title" title={c.title}
           onClick={() => (selectMode ? toggleSelect(c.id) : onOpenConversation(c))}
           onDoubleClick={() => startEdit(c)}>
@@ -199,109 +257,142 @@ export default function Sidebar(props: Props) {
         </button>
         {!selectMode && (
           <button className="conv-more" type="button" title="更多操作" aria-label="更多操作"
-            onClick={() => { if (menuFor === c.id) closeMenu(); else { setMenuFor(c.id); setSubMenu(null); } }}>⋯</button>
+            onClick={e => {
+              if (menu?.c.id === c.id) closeMenu();
+              else openMenu(c, e.currentTarget);
+            }}>⋯</button>
         )}
-        {menuFor === c.id && (
+      </div>
+    );
+  }
+
+  // ---------- 分区头部 ----------
+
+  function renderGroupMenu(g: ConvGroup) {
+    return (
+      <>
+        <button type="button" onClick={() => {
+          setGroupMenuKey(null);
+          setEditingGroupId(g.id);
+          setDraftGroupName(g.name);
+        }}>重命名</button>
+        <button type="button" className="danger" onClick={() => { setGroupMenuKey(null); onDeleteGroup(g); }}>删除</button>
+      </>
+    );
+  }
+
+  function renderSecHead(opts: {
+    sKey: string; label: string; memberIds: number[];
+    group?: ConvGroup; nested?: boolean;
+  }) {
+    const { sKey, label, memberIds, group, nested } = opts;
+    const isCollapsed = collapsed.has(sKey);
+    return (
+      <div className={`sec-head ${nested ? "nested" : ""}`} role="button" tabIndex={0} aria-expanded={!isCollapsed}
+        onClick={() => toggleCollapsed(sKey)}
+        onKeyDown={e => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleCollapsed(sKey); }
+        }}>
+        <span className="sec-caret">{isCollapsed ? "▸" : "▾"}</span>
+        {selectMode && (
+          <SelBox ids={memberIds} selected={selectedIds} onToggle={() => toggleIds(memberIds)} label={label} />
+        )}
+        {editingGroupId != null && group?.id === editingGroupId ? (
+          <input className="sec-edit" autoFocus value={draftGroupName}
+            onClick={e => e.stopPropagation()}
+            onChange={e => setDraftGroupName(e.target.value)}
+            onBlur={() => {
+              setEditingGroupId(null);
+              const next = draftGroupName.trim();
+              if (next && next !== group?.name) onRenameGroup(group!.id, next);
+            }}
+            onKeyDown={e => {
+              if (e.key === "Enter") { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); }
+              if (e.key === "Escape") setEditingGroupId(null);
+            }} />
+        ) : (
+          <span className="sec-name">{label}</span>
+        )}
+        <span className="sec-count">{memberIds.length}</span>
+        {group && (
           <>
-            <div className="menu-scrim" onClick={closeMenu} />
-            <div className="conv-menu">
-              <button type="button" onClick={() => { closeMenu(); startEdit(c); }}>重命名</button>
-              <button type="button" onClick={() => { closeMenu(); onPin(c); }}>{c.pinned ? "取消置顶" : "置顶"}</button>
-              <button type="button" className={subMenu === "project" ? "open" : ""}
-                onClick={() => setSubMenu(subMenu === "project" ? null : "project")}>添加至项目</button>
-              <button type="button" className={subMenu === "group" ? "open" : ""}
-                onClick={() => setSubMenu(subMenu === "group" ? null : "group")}>添加至分组</button>
-              <button type="button" className="danger" onClick={() => { closeMenu(); onDelete(c); }}>删除</button>
-              {subMenu === "project" && (
-                <div className="conv-submenu">
-                  {projects.length === 0 && <span className="sub-empty">暂无项目</span>}
-                  {projects.map(p => (
-                    <button key={p.id} type="button" className={c.project_id === p.id ? "cur" : ""}
-                      onClick={() => { closeMenu(); if (c.project_id !== p.id) onMoveProject(c.id, p.id); }}>
-                      {p.pinned && "📌"}{p.name}{c.project_id === p.id && " ✓"}
-                    </button>
-                  ))}
-                  {c.project_id != null && (
-                    <button type="button" onClick={() => { closeMenu(); onMoveProject(c.id, null); }}>移出项目</button>
-                  )}
+            <button type="button" className="sec-more" aria-label="分组操作"
+              onClick={e => { e.stopPropagation(); setGroupMenuKey(groupMenuKey === `g${group.id}` ? null : `g${group.id}`); }}>⋯</button>
+            {groupMenuKey === `g${group.id}` && (
+              <>
+                <div className="menu-scrim" onClick={() => setGroupMenuKey(null)} />
+                <div className="conv-menu sec-menu">
+                  {renderGroupMenu(group)}
                 </div>
-              )}
-              {subMenu === "group" && (
-                <div className="conv-submenu">
-                  {/* 分组子菜单只列自定义分组，默认分组（项目/任务/未分组）由代码归类 */}
-                  {groups.length === 0 && <span className="sub-empty">暂无自定义分组</span>}
-                  {groups.map(g => (
-                    <button key={g.id} type="button" className={c.group_id === g.id ? "cur" : ""}
-                      onClick={() => { closeMenu(); if (c.group_id !== g.id) onMoveGroup(c.id, g.id); }}>
-                      {g.name}{c.group_id === g.id && " ✓"}
-                    </button>
-                  ))}
-                  {c.group_id != null && (
-                    <button type="button" onClick={() => { closeMenu(); onMoveGroup(c.id, null); }}>移出分组</button>
-                  )}
-                </div>
-              )}
-            </div>
+              </>
+            )}
           </>
         )}
       </div>
     );
   }
 
-  function renderSection(section: (typeof sections)[number]) {
-    const items = buckets.get(section.key) ?? [];
-    // 默认分区“项目/任务”空了不占位；自定义分组与“未分组”始终可见
-    if (section.locked && section.key !== "__none" && items.length === 0) return null;
-    const isCollapsed = collapsed.has(section.key);
+  /** 普通分区：头部 + 行列表（自定义根分组 / 未分组）。 */
+  function renderPlainSection(sKey: string, label: string, convs: Conversation[], group?: ConvGroup) {
     return (
-      <div key={section.key} className="conv-section">
-        <div className="sec-head" role="button" tabIndex={0} aria-expanded={!isCollapsed}
-          onClick={() => toggleCollapsed(section.key)}
-          onKeyDown={e => {
-            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleCollapsed(section.key); }
-          }}>
-          <span className="sec-caret">{isCollapsed ? "▸" : "▾"}</span>
-          {editingGroupId != null && section.group?.id === editingGroupId ? (
-            <input className="sec-edit" autoFocus value={draftGroupName}
-              onClick={e => e.stopPropagation()}
-              onChange={e => setDraftGroupName(e.target.value)}
-              onBlur={() => {
-                setEditingGroupId(null);
-                const next = draftGroupName.trim();
-                if (next && next !== section.group?.name) onRenameGroup(section.group!.id, next);
-              }}
-              onKeyDown={e => {
-                if (e.key === "Enter") { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); }
-                if (e.key === "Escape") setEditingGroupId(null);
-              }} />
-          ) : (
-            <span className="sec-name">{section.label}</span>
-          )}
-          <span className="sec-count">{items.length}</span>
-          {section.group && (
-            <>
-              <button type="button" className="sec-more" aria-label="分组操作"
-                onClick={e => { e.stopPropagation(); setGroupMenuFor(groupMenuFor === section.group!.id ? null : section.group!.id); }}>⋯</button>
-              {groupMenuFor === section.group.id && (
-                <>
-                  <div className="menu-scrim" onClick={() => setGroupMenuFor(null)} />
-                  <div className="conv-menu sec-menu">
-                    <button type="button" onClick={() => {
-                      setGroupMenuFor(null);
-                      setEditingGroupId(section.group!.id);
-                      setDraftGroupName(section.group!.name);
-                    }}>重命名</button>
-                    <button type="button" className="danger" onClick={() => { setGroupMenuFor(null); onDeleteGroup(section.group!); }}>删除</button>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-        </div>
-        {!isCollapsed && <div className="sec-body">{items.map(c => renderRow(c, section.key))}</div>}
+      <div key={sKey} className="conv-section">
+        {renderSecHead({ sKey, label, memberIds: convs.map(c => c.id), group })}
+        {!collapsed.has(sKey) && <div className="sec-body">{convs.map(c => renderRow(c, sKey))}</div>}
       </div>
     );
   }
+
+  /** 父分区：项目（下挂各项目子组别）、任务（下挂任务子组别）。children 已含各自折叠逻辑。 */
+  function renderParentSection(sKey: string, label: string, allConvs: Conversation[], children: ReactNode) {
+    return (
+      <div key={sKey} className="conv-section">
+        {renderSecHead({ sKey, label, memberIds: allConvs.map(c => c.id) })}
+        {!collapsed.has(sKey) && (
+          <div className="sec-body">
+            {children}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /** 项目子组别（每个项目可独立展开/收起）。 */
+  function renderProjectSubgroup(pid: number) {
+    const convs = B(`p:${pid}`);
+    const p = projectMap.get(pid);
+    if (!p || convs.length === 0) return null;
+    const sKey = `p:${pid}`;
+    return (
+      <div key={sKey} className="conv-subsection">
+        {renderSecHead({ sKey, label: p.name, memberIds: convs.map(c => c.id), nested: true })}
+        {!collapsed.has(sKey) && <div className="sec-body sub">{convs.map(c => renderRow(c, sKey))}</div>}
+      </div>
+    );
+  }
+
+  /** 任务子分组（kind=task 的自定义分组，仅任务会话可归入）。 */
+  function renderTaskSubgroup(g: ConvGroup) {
+    const convs = B(`t:${g.id}`);
+    const sKey = `t:${g.id}`;
+    return (
+      <div key={sKey} className="conv-subsection">
+        {renderSecHead({ sKey, label: g.name, memberIds: convs.map(c => c.id), group: g, nested: true })}
+        {!collapsed.has(sKey) && <div className="sec-body sub">{convs.map(c => renderRow(c, sKey))}</div>}
+      </div>
+    );
+  }
+
+  const projectConvs = [...buckets.keys()].filter(k => k.startsWith("p:")).flatMap(k => B(k));
+  const taskBare = B("__taskbare");
+  const taskConvsAll = [...taskBare, ...taskGroups.flatMap(g => B(`t:${g.id}`))];
+
+  // ---------- “移至分组”子菜单的可选目标（任务/普通不混用） ----------
+
+  const menuConv = menu?.c ?? null;
+  const menuIsTask = menuConv?.kind === "task";
+  const groupTargets = menuIsTask ? taskGroups : rootGroups;
+  const projectLabel = menuConv?.project_id != null ? "更换项目" : "添加至项目";
+  const groupLabel = menuConv?.group_id != null ? "更换分组" : "移至分组";
 
   return <aside className="sidebar">
     <div className="brand"><b className="mark">◉</b><div className="brand-word"><strong>Agent</strong><span>工作台</span></div></div>
@@ -319,7 +410,7 @@ export default function Sidebar(props: Props) {
     <div className="section-label conv-head">
       <span>分组</span>
       <div className="groups-tools">
-        <button type="button" className="proj-add" title="新建分组" aria-label="新建分组"
+        <button type="button" className="proj-add" title="新建自定义分组" aria-label="新建自定义分组"
           onClick={() => setCreatingGroup(true)}>＋</button>
         <button type="button" className={`conv-select-toggle ${selectMode ? "on" : ""}`} onClick={toggleSelectMode}>
           {selectMode ? "退出多选" : "多选"}
@@ -363,9 +454,92 @@ export default function Sidebar(props: Props) {
           {(flatList ?? []).map(c => renderRow(c, ""))}
         </>
       ) : (
-        sections.map(renderSection)
+        <>
+          {rootGroups.map(g => renderPlainSection(`g:${g.id}`, g.name, B(`g:${g.id}`), g))}
+          {projectConvs.length > 0 && renderParentSection(
+            "__project", "项目", projectConvs,
+            [...new Set(projectConvs.map(c => c.project_id))].map(pid => renderProjectSubgroup(pid!)),
+          )}
+          {(taskConvsAll.length > 0 || taskGroups.length > 0) && renderParentSection(
+            "__task", "任务", taskConvsAll,
+            <>
+              {taskBare.map(c => renderRow(c, "__taskbare"))}
+              {taskGroups.map(g => renderTaskSubgroup(g))}
+            </>,
+          )}
+          {renderPlainSection("none", "未分组", B("none"))}
+        </>
       )}
     </nav>
+
+    {/* 会话“⋯”菜单：fixed 定位，可越出侧栏，不再被裁切 */}
+    {menu && menuConv && (
+      <>
+        <div className="menu-scrim" onClick={closeMenu} />
+        <div className="conv-menu fixed" style={{ top: menu.top, right: menu.right }}>
+          <button type="button" onClick={() => { closeMenu(); startEdit(menuConv); }}>重命名</button>
+          <button type="button" onClick={() => { closeMenu(); onPin(menuConv); }}>{menuConv.pinned ? "取消置顶" : "置顶"}</button>
+          <button type="button" className={sub?.type === "project" ? "open" : ""}
+            onMouseEnter={e => openSub("project", e.currentTarget)}
+            onClick={e => openSub("project", e.currentTarget)}>{projectLabel}</button>
+          <button type="button" className={sub?.type === "group" ? "open" : ""}
+            onMouseEnter={e => openSub("group", e.currentTarget)}
+            onClick={e => openSub("group", e.currentTarget)}>{groupLabel}</button>
+          <button type="button" className="danger" onClick={() => { closeMenu(); onDelete(menuConv); }}>删除</button>
+        </div>
+        {sub?.type === "project" && (
+          <div className="conv-submenu fixed" style={{ top: sub.top, left: sub.left }}>
+            {projects.length === 0 && <span className="sub-empty">暂无项目</span>}
+            {projects.map(p => (
+              <button key={p.id} type="button" className={menuConv.project_id === p.id ? "cur" : ""}
+                onClick={() => { closeMenu(); if (menuConv.project_id !== p.id) onMoveProject(menuConv, p.id); }}>
+                {p.pinned && "📌"}{p.name}{menuConv.project_id === p.id && " ✓"}
+              </button>
+            ))}
+            {menuConv.project_id != null && (
+              <button type="button" onClick={() => { closeMenu(); onMoveProject(menuConv, null); }}>从项目中移除</button>
+            )}
+          </div>
+        )}
+        {sub?.type === "group" && (
+          <div className="conv-submenu fixed" style={{ top: sub.top, left: sub.left }}>
+            {groupTargets.length === 0 && (
+              <span className="sub-empty">{menuIsTask ? "暂无任务子分组，可在下方新建" : "暂无自定义分组，可在下方新建"}</span>
+            )}
+            {groupTargets.map(g => (
+              <button key={g.id} type="button" className={menuConv.group_id === g.id ? "cur" : ""}
+                onClick={() => { closeMenu(); if (menuConv.group_id !== g.id) onMoveGroup(menuConv, g.id); }}>
+                {g.name}{menuConv.group_id === g.id && " ✓"}
+              </button>
+            ))}
+            {/* 任务会话可从“项目/子分组”直接回到“任务”本体归类；普通会话无此选项 */}
+            {menuIsTask && (menuConv.group_id != null || menuConv.project_id != null) && (
+              <button type="button" onClick={() => { closeMenu(); onMoveToTaskSection(menuConv); }}>任务（直接归类）</button>
+            )}
+            {menuConv.group_id != null && (
+              <button type="button" onClick={() => { closeMenu(); onMoveGroup(menuConv, null); }}>移出分组</button>
+            )}
+            <div className="sub-sep" />
+            {subCreating ? (
+              <input className="sub-input" autoFocus placeholder={menuIsTask ? "子分组名，Enter 创建并移入" : "分组名，Enter 创建并移入"}
+                value={subDraft} onChange={e => setSubDraft(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    const name = subDraft.trim();
+                    closeMenu();
+                    if (name) onCreateGroupFor(menuConv, name);
+                  }
+                  if (e.key === "Escape") setSubCreating(false);
+                }} />
+            ) : (
+              <button type="button" className="sub-new" onClick={() => setSubCreating(true)}>＋ 新建分组</button>
+            )}
+          </div>
+        )}
+      </>
+    )}
+
     <div className="side-foot"><span className="led" />本地运行</div>
   </aside>;
 }

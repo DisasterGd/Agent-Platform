@@ -5,8 +5,8 @@ import { request } from "./api";
 export const groupsApi = {
   list: () => request<ConvGroup[]>("/api/groups"),
 
-  create: (name: string) =>
-    request<ConvGroup>("/api/groups", { method: "POST", body: JSON.stringify({ name }) }),
+  create: (name: string, kind: "group" | "task" = "group") =>
+    request<ConvGroup>("/api/groups", { method: "POST", body: JSON.stringify({ name, kind }) }),
 
   rename: (id: number, name: string) =>
     request<ConvGroup>(`/api/groups/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),

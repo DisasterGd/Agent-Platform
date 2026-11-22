@@ -309,7 +309,7 @@ export default function App() {
     }
   }
 
-  /** 添加至项目 / 添加至分组（以及移出）：PATCH 显式字段，改完刷新列表重算归类。 */
+  /** 会话编辑基础操作：PATCH 显式字段，改完刷新列表重算归类。 */
   async function moveConv(id: number, patch: { project_id?: number | null; group_id?: number | null }) {
     try {
       setError("");
@@ -318,6 +318,37 @@ export default function App() {
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "移动失败");
+    }
+  }
+
+  /** 移入项目时同时离开自定义分组（归类的呈现互斥：先落到哪边，就离开另一边）。 */
+  function moveToProject(c: Conversation, projectId: number | null) {
+    const patch: { project_id: number | null; group_id?: null } = { project_id: projectId };
+    if (projectId != null && c.group_id != null) patch.group_id = null;
+    void moveConv(c.id, patch);
+  }
+
+  /** 移入分组时同时离开项目；任务会话只应被移入任务子分组（菜单侧已限制）。 */
+  function moveToGroup(c: Conversation, groupId: number | null) {
+    const patch: { group_id: number | null; project_id?: null } = { group_id: groupId };
+    if (groupId != null && c.project_id != null) patch.project_id = null;
+    void moveConv(c.id, patch);
+  }
+
+  /** 任务会话直接回到“任务”本体归类：清分组并清项目。 */
+  function moveToTaskSection(c: Conversation) {
+    void moveConv(c.id, { group_id: null, project_id: null });
+  }
+
+  /** 在“移至分组”菜单内新建分组并立刻移入：任务会话建 task 子分组，普通会话建根级分组。 */
+  async function createGroupFor(c: Conversation, name: string) {
+    try {
+      setError("");
+      const g = await groupsApi.create(name, c.kind === "task" ? "task" : "group");
+      setGroups(cur => [...cur, g]);
+      moveToGroup(c, g.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "分组创建失败");
     }
   }
 
@@ -687,8 +718,10 @@ export default function App() {
       onRename={(id, title) => void rename(id, title)}
       onPin={c => void pin(c)}
       onDelete={c => void removeConv(c)}
-      onMoveProject={(id, projectId) => void moveConv(id, { project_id: projectId })}
-      onMoveGroup={(id, groupId) => void moveConv(id, { group_id: groupId })}
+      onMoveProject={moveToProject}
+      onMoveGroup={moveToGroup}
+      onMoveToTaskSection={moveToTaskSection}
+      onCreateGroupFor={(c, name) => void createGroupFor(c, name)}
       onBulkDelete={ids => void bulkDelete(ids)}
       onBulkPin={(ids, pinned) => void bulkPin(ids, pinned)}
       onSetFilter={setListFilter}
@@ -710,7 +743,7 @@ export default function App() {
         </div>
         <div className="topbar-meta">
           <span className="meta-item">模型 <b>DeepSeek</b></span>
-          <span className="meta-item">v0.4.1</span>
+          <span className="meta-item">v0.4.2</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
