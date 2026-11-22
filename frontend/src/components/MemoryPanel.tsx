@@ -167,7 +167,7 @@ export default function MemoryPanel() {
           {rows.map(m => (
             <article className={`mem-item ${m.enabled ? "" : "off"}`} key={m.id}>
               <div className="mem-item-head">
-                <b title={m.title}>{m.title || "记忆"}</b>
+                <b data-tip={m.title}>{m.title || "记忆"}</b>
                 <span className={`mem-src s-${m.source}`}>{SOURCE_LABEL[m.source] ?? m.source}</span>
                 <span className="mem-act">
                   <button type="button" onClick={() => void toggleEnabled(m)}>{m.enabled ? "停用" : "启用"}</button>

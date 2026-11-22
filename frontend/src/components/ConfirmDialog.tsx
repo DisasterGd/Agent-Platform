@@ -27,7 +27,7 @@ export default function ConfirmDialog({ state, onClose }: Props) {
       <div className="modal confirm-modal" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="modal-head">
           <span className="modal-title">{state.title}</span>
-          <button className="modal-close" title="关闭" onClick={() => onClose(false)}>×</button>
+          <button className="modal-close" data-tip="关闭" onClick={() => onClose(false)}>×</button>
         </div>
         <div className="modal-body">
           <p className="confirm-message">{state.message}</p>

@@ -38,6 +38,8 @@ export default function TaskCard({ task, liveText, busy, onExecute, onCancel, on
   const editable = task.status === "awaiting_approval" && !busy;
   const [drafts, setDrafts] = useState<StepDraft[]>([]);
   const [saving, setSaving] = useState(false);
+  // 步骤摘要展开态（替代此前浏览器原生 title 悬停预览）
+  const [openSummary, setOpenSummary] = useState<Set<number>>(new Set());
   const liveRef = useRef<HTMLDivElement>(null);
 
   // 执行中的实时输出：新内容到达即跟随到底部（滚动节奏跟执行速度一致）
@@ -112,7 +114,7 @@ export default function TaskCard({ task, liveText, busy, onExecute, onCancel, on
                     placeholder="这一步要做什么"
                     onChange={e => setDraft(i, { detail: e.target.value })}
                   />
-                  <button className="task-step-remove" type="button" title="删除该步骤"
+                  <button className="task-step-remove" type="button" data-tip="删除该步骤"
                     onClick={() => removeDraft(i)} disabled={drafts.length <= 1}>×</button>
                 </div>
               ) : (
@@ -129,7 +131,20 @@ export default function TaskCard({ task, liveText, busy, onExecute, onCancel, on
                     </div>
                   )}
                   {s.status === "done" && s.summary && (
-                    <div className="task-step-summary" title={s.summary}>{clip(s.summary)}</div>
+                    <div className={`task-step-summary ${openSummary.has(s.idx) ? "open" : ""}`}>
+                      {openSummary.has(s.idx)
+                        ? <Markdown content={s.summary} />
+                        : <span className="sum-line">{clip(s.summary)}</span>}
+                      <button type="button" className="sum-toggle" aria-expanded={openSummary.has(s.idx)}
+                        onClick={() => setOpenSummary(cur => {
+                          const n = new Set(cur);
+                          if (n.has(s.idx)) n.delete(s.idx);
+                          else n.add(s.idx);
+                          return n;
+                        })}>
+                        {openSummary.has(s.idx) ? "收起" : "展开全文"}
+                      </button>
+                    </div>
                   )}
                   {s.status === "failed" && s.error && (
                     <div className="task-step-error">{s.error}</div>

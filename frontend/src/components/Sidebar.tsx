@@ -400,20 +400,20 @@ export default function Sidebar(props: Props) {
           <input type="checkbox" className="conv-check" checked={selectedIds.has(c.id)}
             onChange={() => toggleSelect(c.id)} aria-label={`选择会话 ${c.title}`} />
         )}
-        {showProjTag && <span className="conv-tag" title={projectName ?? ""}>{projectName}</span>}
-        {!showProjTag && showTaskTag && <span className="conv-tag" title="任务模式相关会话">任务</span>}
-        <button className="conv-title" title={c.title}
+        {showProjTag && <span className="conv-tag" data-tip={projectName ?? ""}>{projectName}</span>}
+        {!showProjTag && showTaskTag && <span className="conv-tag" data-tip="任务模式相关会话">任务</span>}
+        <button className="conv-title" data-tip={c.title}
           onClick={() => (selectMode ? toggleSelect(c.id) : onOpenConversation(c))}
           onDoubleClick={() => startEdit(c)}>
           <span className="conv-dot" aria-hidden />
           {generatingConvId === c.id && (
-            <span className="conv-spinner" role="status" aria-label="正在生成" title="正在生成" />
+            <span className="conv-spinner" role="status" aria-label="正在生成" data-tip="正在生成" />
           )}
-          {c.pinned && <span className="conv-pin-flag" title="已置顶">📌</span>}
+          {c.pinned && <span className="conv-pin-flag" data-tip="已置顶">📌</span>}
           {c.title}
         </button>
         {!selectMode && (
-          <button className="conv-more" type="button" title="更多操作" aria-label="更多操作"
+          <button className="conv-more" type="button" data-tip="更多操作" aria-label="更多操作"
             onClick={e => {
               if (menu?.c.id === c.id) closeMenu();
               else openMenu(c, e.currentTarget);
@@ -567,18 +567,18 @@ export default function Sidebar(props: Props) {
 
   if (collapsed && !narrow) {
     return <aside className="sidebar rail">
-      <button type="button" className="rail-mark" title="展开侧栏" aria-label="展开侧栏" onClick={() => onToggleCollapsed(false)}>
+      <button type="button" className="rail-mark" data-tip="展开侧栏" aria-label="展开侧栏" onClick={() => onToggleCollapsed(false)}>
         <b className="mark">◉</b>
       </button>
       <div className="rail-list">
-        <button type="button" className="rail-btn" title="新聊天" aria-label="新聊天" onClick={onNewChat}><PenIcon /></button>
-        <button type="button" className="rail-btn" title="搜索" aria-label="搜索" onClick={onOpenSearch}><SearchIcon /></button>
-        <button type="button" className={`rail-btn ${recentOpen ? "on" : ""}`} title="最近" aria-label="最近会话"
+        <button type="button" className="rail-btn" data-tip="新聊天" aria-label="新聊天" onClick={onNewChat}><PenIcon /></button>
+        <button type="button" className="rail-btn" data-tip="搜索" aria-label="搜索" onClick={onOpenSearch}><SearchIcon /></button>
+        <button type="button" className={`rail-btn ${recentOpen ? "on" : ""}`} data-tip="最近" aria-label="最近会话"
           onClick={e => (recentOpen ? setRecentOpen(false) : openRecent(e.currentTarget))}><ClockIcon /></button>
-        <button type="button" className="rail-btn" title="项目" aria-label="项目" onClick={onOpenProjects}><FolderIcon /></button>
+        <button type="button" className="rail-btn" data-tip="项目" aria-label="项目" onClick={onOpenProjects}><FolderIcon /></button>
       </div>
       <div className="rail-foot">
-        <button type="button" className="rail-btn" title="展开侧栏" aria-label="展开侧栏" onClick={() => onToggleCollapsed(false)}>
+        <button type="button" className="rail-btn" data-tip="展开侧栏" aria-label="展开侧栏" onClick={() => onToggleCollapsed(false)}>
           <CollapseIcon flip />
         </button>
       </div>
@@ -590,7 +590,7 @@ export default function Sidebar(props: Props) {
             <div className="recent-head">最近</div>
             {recentConvs.length === 0 && <div className="sub-empty">最近还没有会话</div>}
             {recentConvs.map(c => (
-              <button key={c.id} type="button" className="recent-item" title={c.title}
+              <button key={c.id} type="button" className="recent-item" data-tip={c.title}
                 onClick={() => { setRecentOpen(false); onOpenConversation(c); }}>
                 {c.pinned && "📌 "}{c.title}
               </button>
@@ -607,7 +607,7 @@ export default function Sidebar(props: Props) {
     <div className="brand">
       <b className="mark">◉</b>
       <div className="brand-word"><strong>Agent</strong><span>工作台</span></div>
-      <button type="button" className="side-collapse" title="收起侧栏" aria-label="收起侧栏" onClick={() => onToggleCollapsed(true)}>
+      <button type="button" className="side-collapse" data-tip="收起侧栏" aria-label="收起侧栏" onClick={() => onToggleCollapsed(true)}>
         <CollapseIcon />
       </button>
     </div>
@@ -625,7 +625,7 @@ export default function Sidebar(props: Props) {
     <div className="section-label conv-head">
       <span>分组</span>
       <div className="groups-tools">
-        <button type="button" className="proj-add" title="新建自定义分组" aria-label="新建自定义分组"
+        <button type="button" className="proj-add" data-tip="新建自定义分组" aria-label="新建自定义分组"
           onClick={() => setCreatingGroup(true)}>＋</button>
         <button type="button" className={`conv-select-toggle ${selectMode ? "on" : ""}`} onClick={toggleSelectMode}>
           {selectMode ? "退出多选" : "多选"}
@@ -687,7 +687,7 @@ export default function Sidebar(props: Props) {
 
     {/* 拖宽把手（窄屏禁用） */}
     {!narrow && (
-      <div className="side-resizer" role="separator" aria-orientation="vertical" title="拖动调整侧栏宽度" onMouseDown={startDrag} />
+      <div className="side-resizer" role="separator" aria-orientation="vertical" data-tip="拖动调整侧栏宽度" onMouseDown={startDrag} />
     )}
 
     {/* 会话“⋯”菜单：fixed 定位，可越出侧栏，不再被裁切 */}

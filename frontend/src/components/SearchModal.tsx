@@ -175,7 +175,7 @@ export default function SearchModal(props: Props) {
       <div className="modal wide" onClick={e => e.stopPropagation()}>
         <div className="modal-head">
           <span className="modal-title">搜索</span>
-          <button className="modal-close" title="关闭" onClick={onClose}>×</button>
+          <button className="modal-close" data-tip="关闭" onClick={onClose}>×</button>
         </div>
         <div className="search-input-row">
           <input className="search-input" autoFocus placeholder="搜索对话、任务、项目、分组…"

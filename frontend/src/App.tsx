@@ -7,6 +7,7 @@ import Markdown from "./components/Markdown";
 import SettingsModal from "./components/SettingsModal";
 import ConfirmDialog, { type ConfirmState } from "./components/ConfirmDialog";
 import ThinkingTicker, { useThinkingTracker } from "./components/ThinkingTicker";
+import GlobalTip from "./components/GlobalTip";
 import Sidebar, { type ListFilter } from "./components/Sidebar";
 import SearchModal from "./components/SearchModal";
 import ProjectsModal from "./components/ProjectsModal";
@@ -801,7 +802,7 @@ export default function App() {
         </div>
         <div className="topbar-meta">
           <span className="meta-item">模型 <b>DeepSeek</b></span>
-          <span className="meta-item">v0.4.5</span>
+          <span className="meta-item">v0.4.6</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
@@ -815,7 +816,7 @@ export default function App() {
               {questions.map((q, i) => {
                 const latest = q.items[q.items.length - 1];
                 return (
-                <button key={q.key} className="index-item" title={latest.content} onClick={() => jumpTo(q.key)}>
+                <button key={q.key} className="index-item" data-tip={latest.content} onClick={() => jumpTo(q.key)}>
                   <span className="index-num">{i + 1}</span>
                   <span className="index-label">{latest.content.replace(/\s+/g, " ").trim().slice(0, 18) || "…"}</span>
                 </button>
@@ -847,7 +848,7 @@ export default function App() {
                 const isEditing = editingMsgId === t.key;
                 // 版本翻页器：同一逻辑消息有多个版本（重新生成/编辑产生）时显示“‹ n/N ›”
                 const pager = hasVariants && (
-                  <span className="msg-versions" title="该消息有多个版本，可左右翻页查看">
+                  <span className="msg-versions" data-tip="该消息有多个版本，可左右翻页查看">
                     <button type="button" aria-label="上一版本" disabled={sel <= 0}
                       onClick={() => setVersionSel(v => ({ ...v, [t.key]: Math.max(0, selectedVersion(v, t) - 1) }))}>‹</button>
                     <em>{sel + 1}/{t.items.length}</em>
@@ -929,7 +930,7 @@ export default function App() {
         </section>
 
         {showJumpBottom && turns.length > 0 && (
-          <button type="button" className="jump-bottom" aria-label="回到底部" title="回到底部" onClick={jumpToBottom}>
+          <button type="button" className="jump-bottom" aria-label="回到底部" data-tip="回到底部" onClick={jumpToBottom}>
             <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M8 2.6v9.2M4 8.6l4 4 4-4" />
             </svg>
@@ -947,7 +948,7 @@ export default function App() {
                     {a.content_type.startsWith("image/")
                       ? <img src={a.url} alt={a.name} />
                       : <span className="chip-file">📄 {a.name}</span>}
-                    <button type="button" title="移除" onClick={() => removeAttachment(i)}>×</button>
+                    <button type="button" data-tip="移除" onClick={() => removeAttachment(i)}>×</button>
                   </span>
                 ))}
               </div>
@@ -961,7 +962,7 @@ export default function App() {
                 <input ref={fileInputRef} type="file" multiple hidden
                   accept="image/*,.pdf,.doc,.docx,.md,.txt,.csv,.json,.xlsx,.pptx"
                   onChange={e => void attachFiles(e.target.files)} />
-                <button className="attach-btn" type="button" title="上传文件或图片"
+                <button className="attach-btn" type="button" data-tip="上传文件或图片"
                   onClick={() => fileInputRef.current?.click()}>＋</button>
                 <span className="hint">支持联网搜索与文档生成；多步工作请切换到顶栏「任务」界面</span>
               </div>
@@ -1018,5 +1019,6 @@ export default function App() {
       <SettingsModal theme={theme} onThemeChange={setTheme} onClose={() => setSettingsOpen(false)} />
     )}
     {confirmState && <ConfirmDialog state={confirmState} onClose={closeConfirm} />}
+    <GlobalTip />
   </div>;
 }

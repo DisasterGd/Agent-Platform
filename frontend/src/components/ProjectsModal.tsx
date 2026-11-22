@@ -59,7 +59,7 @@ export default function ProjectsModal(props: Props) {
       <div className="modal xwide" onClick={e => e.stopPropagation()}>
         <div className="modal-head">
           <span className="modal-title">项目</span>
-          <button className="modal-close" title="关闭" onClick={onClose}>×</button>
+          <button className="modal-close" data-tip="关闭" onClick={onClose}>×</button>
         </div>
 
         <div className="proj-toolbar">
@@ -95,7 +95,7 @@ export default function ProjectsModal(props: Props) {
                         if (e.key === "Escape") setEditingId(null);
                       }} />
                   ) : (
-                    <button type="button" className="proj-card-open" title="筛选该项目的会话"
+                    <button type="button" className="proj-card-open" data-tip="筛选该项目的会话"
                       onClick={() => { onPick(p.id); onClose(); }}>
                       <span className="proj-card-name">{p.pinned && "📌 "}{p.name}</span>
                       <span className="proj-card-desc">{p.description || "暂无描述"}</span>

@@ -61,7 +61,7 @@ export default function SettingsModal({ theme, onThemeChange, onClose }: Props) 
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-head">
           <span className="modal-title">设置</span>
-          <button className="modal-close" title="关闭" onClick={onClose}>×</button>
+          <button className="modal-close" data-tip="关闭" onClick={onClose}>×</button>
         </div>
 
         <div className="modal-tabs">
