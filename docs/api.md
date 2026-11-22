@@ -1,4 +1,4 @@
-# API v0.4.1
+# API v0.4.2
 
 | Method | Path | 用途 |
 |---|---|---|
@@ -12,7 +12,7 @@
 | POST | `/api/chat/stream` | SSE 流式回复（工具调用、附件、记忆注入） |
 | POST | `/api/chat/regenerate` | 重新生成最后一轮回复（版本链追加） |
 | GET | `/api/search?q=&scope=` | v0.4.1 全局搜索（scope=all/conversations/tasks/projects/groups；会话带最新消息摘要，任务带步骤进度） |
-| GET/POST/PATCH/DELETE | `/api/groups[/{id}]` | v0.4.1 自定义分组：列表 / 新建 / 重命名 / 删除（会话退回默认归类） |
+| GET/POST/PATCH/DELETE | `/api/groups[/{id}]` | v0.4.1 自定义分组：列表 / 新建（`kind=group` 根级 / `kind=task` 任务子分组）/ 重命名 / 删除（会话退回默认归类） |
 | GET/POST/PATCH/DELETE | `/api/projects[/{id}]` | v0.4 项目：列表 / 新建 / 重命名、改描述、置顶 / 删除 |
 | GET/POST/PATCH/DELETE | `/api/memories[/{id}]` | v0.4 记忆：查询（`scope`、`project_id` 过滤）/ 手动添加 / 编辑、启停 / 删除 |
 | POST | `/api/files` | 上传文件/图片（multipart） |

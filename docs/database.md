@@ -1,8 +1,9 @@
-# 数据库说明 v0.4.1
+# 数据库说明 v0.4.2
 
 - `users`：用户主体；当前仅创建本地开发用户（`DEV_USER_ID`）。
 - `projects`：v0.4 项目，会话与项目记忆的归属分组（`name` / `description` / `pinned`）。
 - `conv_groups`：v0.4.1 用户自定义会话分组（仅存自定义分组；默认分组“项目/任务/未分组”由代码归类，不建记录）。
+  `kind`=group 根级自定义分组 / task “任务”分区下的子分组（仅任务会话可归入，任务与普通会话不混用）。
 - `conversations`：会话。`user_id` 所有权、`project_id` 归属（NULL=未分组）、v0.4.1 `group_id` 自定义分组归属（NULL=按默认归类）；
   v0.4 新增 `summary` + `summary_covered_id`：超长历史的自动压缩摘要（会话记忆，临时性质）；
   `kind`（chat/task）不占列，由任务表派生（存在绑定该会话的任务即为 task，列表用 selectinload 避免 N+1）。
@@ -18,7 +19,7 @@
 - Engine：数据库连接池入口。
 - Session：工作单元，跟踪对象并提交事务。
 - Repository：封装查询与写入。
-- Alembic：数据库结构版本管理（当前迁移链 0001–0007）。
+- Alembic：数据库结构版本管理（当前迁移链 0001–0008）。
 
 迁移命令（backend 目录）：
 ```powershell
