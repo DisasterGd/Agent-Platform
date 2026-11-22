@@ -1,4 +1,4 @@
-# Agent Platform v0.4
+# Agent Platform v0.4.1
 
 本地优先的智能 Agent 平台：React + TypeScript + Vite、FastAPI、MySQL、SQLAlchemy 2.x、Alembic、SSE，默认接入 DeepSeek（OpenAI 兼容接口）。
 
@@ -64,6 +64,22 @@
   “自动记忆”开关（关闭后停止提炼与注入，仍可手动管理）
 - 记忆与压缩事件并入“思考过程”面板：`context_compressed`、`memory_saved`
 - 新增迁移 `0006_memory`（projects / memories 表 + 会话摘要列）；任务执行器同样注入记忆
+
+**v0.4.1（工作台重组：搜索 · 项目 · 分组 · 任务界面）**
+
+- **侧栏自上而下改为“新聊天 / 搜索 / 项目”三个动作**：搜索与项目各自弹出独立窗口，会话列表区改为分组分区
+- **搜索弹窗**：支持按“全部 / 对话 / 任务 / 项目 / 分组”筛选（`GET /api/search`）；命中会话的标题与消息正文、任务目标、项目与分组名称；
+  每条结果带最近的相关信息（会话取最后一条消息摘要，任务带状态与步骤进度）；范围内没有命中时显示“「xx」中无结果”
+- **项目弹窗**：双栏卡片网格展示全部项目（名称、描述、会话/任务数、最近活动）；新建、重命名、置顶、删除与“选中筛选”都在弹窗内完成
+- **分组体系**：除用户**自定义分组**（新表 `conv_groups` + `conversations.group_id`，`/api/groups` CRUD）外，
+  设置**默认分组**：项目、任务、未分组；归类由代码完成，优先级为 自定义分组 → 项目 → 任务 → 未分组，
+  其中“任务”自动收纳任务模式产生的会话（由任务表派生 `kind=task`，无需手工归类）
+- 会话“⋯”菜单新增**添加至项目 / 添加至分组**（子菜单只列自定义分组与项目，不含默认分组；移出同样在此操作）
+- **任务模式升级为独立界面**：输入框的“任务模式”开关移除，顶栏提供“聊天 / 任务”切换；
+  任务界面 = 左侧任务列表（状态筛选）+ 右侧计划审阅/执行/结果 + 底部目标输入；执行结果仍写回会话，可一键“在对话中查看”；
+  聊天与任务来回切换时，左侧信息栏（会话与分组列表）保持不变
+- 配套接口与迁移：新增 `0007_conv_groups`、`GET /api/tasks`（缺省返回全部任务）、`DELETE /api/tasks/{id}`、
+  `PATCH /api/conversations/{id}` 支持显式 `project_id` / `group_id`（含 null=移出）；无 Key 时前端演示模式行为不变
 
 当前开发用户 ID 仅用于本地单用户开发，不是身份认证；公网部署前必须实现真实认证和服务端权限校验。
 
@@ -139,7 +155,7 @@ python ..\scripts\init_db.py
 python run.py
 ```
 
-- `alembic upgrade head` 创建 `users` / `conversations` / `messages` / `tasks` / `task_steps` / `projects` / `memories` 七张表（消息版本链、任务与记忆表由迁移补齐）。
+- `alembic upgrade head` 创建 `users` / `conversations` / `messages` / `tasks` / `task_steps` / `projects` / `memories` / `conv_groups` 八张表（消息版本链、任务、记忆与分组表由迁移补齐）。
 - `init_db.py` 补一个开发用户（id=1）并做幂等建表兜底。
 - `run.py` 一键启动后端并同时托管已构建的 `frontend/dist`，自动打开浏览器。
 
@@ -172,8 +188,9 @@ npm run dev
 4. 填了 `LLM_API_KEY` 后重启后端，回复来自真实模型。
 5. 工具调用：发送「帮我查一下今天的热点新闻」应触发联网搜索；发送「写一份周报并导出成 PDF」应触发文件生成并出现下载卡片。
 6. 重新生成：对最后一轮回复点「重新生成」，旧回答保留，气泡上出现 `‹ 2/2 ›` 可翻页回看。
-7. 任务模式：打开输入框左侧「任务模式」，发送一个多步目标（如「调研三款 AI 搜索产品，对比功能并写成 Word 报告」），先出现可编辑的步骤计划，点「执行计划」后逐步点亮状态，完成后可在会话中看到最终总结与产物文件。
-8. 记忆（v0.4）：对话里说「请记住我以后都用中文写注释」，思考面板应提示写入记忆；打开「设置 → 记忆」能看到该条（来源=用户要求记住）；新开一个会话提问时，模型应表现出已知该偏好。在项目栏新建项目并选中后，新会话归属该项目，其项目记忆只在选中之生效。
+7. 任务界面（v0.4.1）：点顶栏「任务」切到任务界面，在底部输入一个多步目标（如「调研三款 AI 搜索产品，对比功能并写成 Word 报告」），先出现可编辑的步骤计划，点「执行计划」后逐步点亮状态，完成后可看到最终总结，点「在对话中查看」回到会话继续追问；期间左侧信息栏不变。
+8. 记忆（v0.4）：对话里说「请记住我以后都用中文写注释」，思考面板应提示写入记忆；打开「设置 → 记忆」能看到该条（来源=用户要求记住）；新开一个会话提问时，模型应表现出已知该偏好。在侧栏「项目」弹窗新建项目并选中后，新会话与新任务归属该项目，其项目记忆只在选中时生效。
+9. 分组与搜索（v0.4.1）：会话“⋯”→ 添加至分组，先在「分组」标题旁 ＋ 新建自定义分组再选择它，会话行应移入该分组分区；「添加至项目」子菜单只列项目、分组子菜单不出现“项目/任务/未分组”默认分组；任务模式产生的会话自动出现在「任务」分区；侧栏「搜索」输入关键词验证各筛选标签与“「xx」中无结果”提示。
 
 ## 联网搜索
 
@@ -192,21 +209,21 @@ SEARCH_PROVIDER=tavily       # Tavily（面向 LLM 的搜索 API，需 SEARCH_AP
 
 ```text
 backend/
-  apps/api/                  FastAPI 入口与路由（chat / tasks / projects / memories / files / settings / auth / health）
+  apps/api/                  FastAPI 入口与路由（chat / tasks / projects / groups / search / memories / files / settings / auth / health）
   src/agent_platform/        核心库
     core/                    agent.py 工具循环 · planner.py 任务规划 · runner.py 任务执行 · events.py 事件词汇表 · context.py 上下文(摘要+记忆注入)
     memory/                  v0.4 三级记忆：manager 门面 · conversation 历史压缩 · long_term 提炼/归类/注入
     models/                  大模型适配层（供应商登记表）
     tools/                   工具注册表 + 内置工具（web_search / fetch_url / generate_file）
-    services/                业务用例层（chat_service · task_service · project_service · memory_service · settings_service）
-    repositories/            数据访问层（conversations · messages(版本链) · tasks · projects · memories）
+    services/                业务用例层（chat_service · task_service · project_service · group_service · search_service · memory_service · settings_service）
+    repositories/            数据访问层（conversations · messages(版本链) · tasks · projects · groups · memories）
     infrastructure/          database / storage(可读命名+去重) / search / generation / attachments
-  migrations/                Alembic 迁移（0001–0006）
+  migrations/                Alembic 迁移（0001–0007）
   pyproject.toml             后端依赖（pip install -e ".[dev]"）
 frontend/
   src/
-    components/              Markdown 富渲染 · TaskCard 任务卡 · ThinkingTicker 思考面板 · MemoryPanel 记忆管理 · ConfirmDialog 确认弹窗 · SettingsModal
-    services/                api / chat(SSE) / tasks / projects / memories / settings
+    components/              Sidebar 侧栏（动作区+分组分区） · SearchModal 搜索弹窗 · ProjectsModal 项目弹窗 · TaskWorkspace 任务界面 · TaskCard 任务卡 · Markdown 富渲染 · ThinkingTicker 思考面板 · MemoryPanel 记忆管理 · ConfirmDialog 确认弹窗 · SettingsModal
+    services/                api / chat(SSE) / tasks / projects / groups / search / memories / settings
     styles/                  设计令牌（浅色/深色）
     types/                   类型定义
 scripts/                     check_db.py / init_db.py
@@ -240,4 +257,5 @@ data/                        上传与生成的文件、settings.json（gitignor
 - Agent Core 不依赖 FastAPI Request/Response，保持可独立演进；Planner / Runner 同样只依赖模型协议。
 - 任务执行开始（生成阶段）即绑定会话并写入目标消息，完成或失败都写回结果；删除会话会级联删除其任务与步骤。
 - 记忆持久化≠作用域：memories 按 scope（global/project）检索注入；会话摘要只是临时记忆，随会话删除；删除项目只清其项目记忆，会话退回未分组。
+- 分组归类由代码完成（v0.4.1）：优先级 自定义分组 → 项目 → 任务（由任务表派生 kind）→ 未分组；默认分组不落库，自定义分组删除后会话退回默认归类；“添加至分组”菜单只列自定义分组。
 - 云端版本必须替换开发身份依赖，增加认证、权限、限流、HTTPS 和密钥管理。
