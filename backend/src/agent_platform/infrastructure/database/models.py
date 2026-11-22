@@ -29,6 +29,8 @@ class Conversation(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     project_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    # v0.4.1 用户自定义分组（默认分组“项目/任务/未分组”由代码归类，不落列）
+    group_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(200), default="新会话")
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     # v0.4 会话记忆：超长历史的自动压缩摘要（临时记忆，非持久化知识）
@@ -38,6 +40,13 @@ class Conversation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     user: Mapped["User"] = relationship(back_populates="conversations")
     messages: Mapped[list["Message"]] = relationship(back_populates="conversation", cascade="all, delete-orphan")
+    # 只读关联：供 kind 归类与列表加载（任务会话删除由数据库级联负责）
+    tasks: Mapped[list["Task"]] = relationship(viewonly=True, foreign_keys="Task.conversation_id")
+
+    @property
+    def kind(self) -> str:
+        """会话类别（默认分组“任务”的判定依据）：任务模式产生的会话为 task。"""
+        return "task" if self.tasks else "chat"
 
 class Project(Base):
     """v0.4 项目：会话与项目记忆的归属分组。"""
@@ -48,6 +57,16 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(200), default="未命名项目")
     description: Mapped[str] = mapped_column(Text, default="")
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+class ConversationGroup(Base):
+    """v0.4.1 用户自定义分组：仅存自定义分组，默认分组（项目/任务/未分组）由代码归类。"""
+    __tablename__ = "conv_groups"
+    __table_args__ = (Index("ix_conv_groups_user_updated", "user_id", "updated_at"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(200), default="未命名分组")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 

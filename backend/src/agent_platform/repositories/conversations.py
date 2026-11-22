@@ -1,10 +1,10 @@
 """会话数据读写。"""
 from __future__ import annotations
 
-from sqlalchemy import func, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy import func, or_, select, update
+from sqlalchemy.orm import Session, selectinload
 
-from agent_platform.infrastructure.database.models import Conversation
+from agent_platform.infrastructure.database.models import Conversation, Message
 
 
 class ConversationRepository:
@@ -20,7 +20,7 @@ class ConversationRepository:
 
     def list_by_user(self, user_id: int, project_id: int | None = ..., pinned_first: bool = True) -> list[Conversation]:
         """project_id=... 表示不过滤；传 int 按项目过滤；传 None 只看“未分组”会话。"""
-        stmt = select(Conversation).where(Conversation.user_id == user_id)
+        stmt = select(Conversation).options(selectinload(Conversation.tasks)).where(Conversation.user_id == user_id)
         if project_id is not ...:
             stmt = stmt.where(Conversation.project_id == project_id)
         if pinned_first:
@@ -92,3 +92,39 @@ class ConversationRepository:
         if conversation is not None:
             conversation.project_id = project_id
             self.db.commit()
+
+    def set_group(self, conversation_id: int, group_id: int | None) -> None:
+        """v0.4.1 归属自定义分组；传 None 表示移出分组（回到默认归类）。"""
+        conversation = self.db.get(Conversation, conversation_id)
+        if conversation is not None:
+            conversation.group_id = group_id
+            self.db.commit()
+
+    def clear_group(self, group_id: int) -> int:
+        """分组删除后把其会话退回默认归类（项目/任务/未分组）。"""
+        rows = list(self.db.scalars(select(Conversation).where(Conversation.group_id == group_id)))
+        for row in rows:
+            row.group_id = None
+        self.db.commit()
+        return len(rows)
+
+    def search(self, user_id: int, keyword: str, limit: int = 20) -> list[Conversation]:
+        """标题命中或任一消息正文命中（LIKE 小写库即可；规模大了再上全文检索/向量）。"""
+        like = f"%{keyword}%"
+        matched_ids = (
+            select(Message.conversation_id)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(Conversation.user_id == user_id, Message.content.like(like))
+            .distinct()
+        )
+        stmt = (
+            select(Conversation)
+            .options(selectinload(Conversation.tasks))
+            .where(
+                Conversation.user_id == user_id,
+                or_(Conversation.title.like(like), Conversation.id.in_(matched_ids)),
+            )
+            .order_by(Conversation.pinned.desc(), Conversation.updated_at.desc())
+            .limit(limit)
+        )
+        return list(self.db.scalars(stmt))

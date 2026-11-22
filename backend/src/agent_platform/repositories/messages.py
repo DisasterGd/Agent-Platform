@@ -75,3 +75,11 @@ class MessageRepository:
             select(func.max(Message.variant_index)).where(Message.group_id == group_id)
         )
         return (current or 0) + 1
+
+    def latest_snippet(self, conversation_id: int, width: int = 90) -> str:
+        """会话“最近的相关信息”：取最新版本链中最后一条消息的正文摘要（搜索弹窗用）。"""
+        rows = self.list_active_by_conversation(conversation_id)
+        if not rows:
+            return ""
+        text = " ".join(rows[-1].content.split())
+        return text[:width] + ("…" if len(text) > width else "")

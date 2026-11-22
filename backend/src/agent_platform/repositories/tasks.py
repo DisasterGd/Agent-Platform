@@ -1,7 +1,7 @@
 """任务与步骤数据读写。"""
 from __future__ import annotations
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from agent_platform.infrastructure.database.models import Task, TaskStep
@@ -34,6 +34,30 @@ class TaskRepository:
             .options(selectinload(Task.steps))
             .where(Task.conversation_id == conversation_id)
             .order_by(Task.created_at.desc(), Task.id.desc())
+        )
+        return list(self.db.scalars(stmt))
+
+    def list_by_user(self, user_id: int, limit: int | None = None) -> list[Task]:
+        """v0.4.1 任务界面：该用户的全部任务（含未绑定会话的待审阅任务）。"""
+        stmt = (
+            select(Task)
+            .options(selectinload(Task.steps))
+            .where(Task.user_id == user_id)
+            .order_by(Task.updated_at.desc(), Task.id.desc())
+        )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return list(self.db.scalars(stmt))
+
+    def search(self, user_id: int, keyword: str, limit: int = 20) -> list[Task]:
+        """目标或最终总结命中关键词（搜索弹窗“任务”范围）。"""
+        like = f"%{keyword}%"
+        stmt = (
+            select(Task)
+            .options(selectinload(Task.steps))
+            .where(Task.user_id == user_id, or_(Task.goal.like(like), Task.summary.like(like)))
+            .order_by(Task.updated_at.desc(), Task.id.desc())
+            .limit(limit)
         )
         return list(self.db.scalars(stmt))
 
@@ -98,6 +122,16 @@ class TaskRepository:
         if artifacts is not None:
             step.artifacts = artifacts
         self.db.commit()
+
+    def delete(self, task_id: int) -> bool:
+        """删除任务记录（步骤一并删除）；不影响任务已产生的会话。"""
+        task = self.db.get(Task, task_id)
+        if task is None:
+            return False
+        self.db.execute(delete(TaskStep).where(TaskStep.task_id == task_id))
+        self.db.delete(task)
+        self.db.commit()
+        return True
 
     def reset_steps(self, task_id: int) -> None:
         """重试前把步骤恢复为 pending。"""

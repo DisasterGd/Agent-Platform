@@ -1,7 +1,7 @@
 """项目数据读写（v0.4）。"""
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from agent_platform.infrastructure.database.models import Project
@@ -56,3 +56,14 @@ class ProjectRepository:
         self.db.delete(project)
         self.db.commit()
         return True
+
+    def search(self, user_id: int, keyword: str, limit: int = 20) -> list[Project]:
+        """名称或描述命中关键词（搜索弹窗“项目”范围）。"""
+        like = f"%{keyword}%"
+        stmt = (
+            select(Project)
+            .where(Project.user_id == user_id, or_(Project.name.like(like), Project.description.like(like)))
+            .order_by(Project.pinned.desc(), Project.updated_at.desc())
+            .limit(limit)
+        )
+        return list(self.db.scalars(stmt))
