@@ -1,4 +1,4 @@
-# 数据库说明 v0.4.5
+# 数据库说明 v0.4.6
 
 - `users`：用户主体；当前仅创建本地开发用户（`DEV_USER_ID`）。
 - `projects`：v0.4 项目，会话与项目记忆的归属分组（`name` / `description` / `pinned`）。
