@@ -1,7 +1,7 @@
 {
   "name": "agent-platform-frontend",
   "private": true,
-  "version": "0.4.6",
+  "version": "0.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -10,15 +10,15 @@
     "typecheck": "tsc -b --pretty"
   },
   "dependencies": {
+    "katex": "^0.16.11",
     "mermaid": "^11.4.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^9.0.1",
     "react-syntax-highlighter": "^15.6.1",
-    "remark-gfm": "^4.0.0",
-    "remark-math": "^6.0.0",
     "rehype-katex": "^7.0.1",
-    "katex": "^0.16.11"
+    "remark-gfm": "^4.0.0",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.1.8",
