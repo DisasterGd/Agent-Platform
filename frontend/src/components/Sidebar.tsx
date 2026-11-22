@@ -11,6 +11,8 @@ interface Props {
   activeId: number | null;
   generatingConvId: number | null;
   listFilter: ListFilter;
+  collapsed: boolean;
+  onToggleCollapsed: (v: boolean) => void;
   onNewChat: () => void;
   onOpenSearch: () => void;
   onOpenProjects: () => void;
@@ -39,6 +41,9 @@ interface Props {
 }
 
 const collapsedStore = "sidebar.collapsedSections";
+const widthStore = "sidebar.width";
+/** 拉伸下限 = v0.4.2 之前的默认宽度；上限与收起态在 clamp 中按视口计算。 */
+const MIN_WIDTH = 246;
 
 function loadCollapsed(): Set<string> {
   try {
@@ -47,6 +52,30 @@ function loadCollapsed(): Set<string> {
   } catch {
     return new Set();
   }
+}
+
+function clampWidth(w: number): number {
+  const max = Math.round(window.innerWidth * 0.4);
+  return Math.min(Math.max(w, MIN_WIDTH), Math.max(max, MIN_WIDTH));
+}
+
+function loadWidth(): number {
+  try {
+    const saved = Number(localStorage.getItem(widthStore));
+    if (Number.isFinite(saved) && saved >= MIN_WIDTH) return clampWidth(saved);
+  } catch { /* 忽略 */ }
+  return clampWidth(Math.round(window.innerWidth * 0.3));
+}
+
+function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 760px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 760px)");
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return narrow;
 }
 
 function byName(a: { name: string }, b: { name: string }) {
@@ -70,6 +99,33 @@ function FolderIcon() {
   );
 }
 
+function PenIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M11.2 2.4 13.6 4.8 5.2 13.2l-3 .8.8-3z" />
+    </svg>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 4.6V8l2.4 1.6" />
+    </svg>
+  );
+}
+
+function CollapseIcon({ flip }: { flip?: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden
+      style={flip ? { transform: "scaleX(-1)" } : undefined}>
+      <rect x="1.6" y="2.6" width="12.8" height="10.8" rx="1.6" />
+      <line x1="6.2" y1="2.6" x2="6.2" y2="13.4" />
+    </svg>
+  );
+}
+
 /** 分区头部的“全选”复选框（多选模式下出现；部分选中时显示为半选）。 */
 function SelBox({ ids, selected, onToggle, label }: {
   ids: number[]; selected: Set<number>; onToggle: () => void; label: string;
@@ -89,11 +145,14 @@ function SelBox({ ids, selected, onToggle, label }: {
 export default function Sidebar(props: Props) {
   const {
     conversations, projects, groups, activeId, generatingConvId, listFilter,
+    collapsed, onToggleCollapsed,
     onNewChat, onOpenSearch, onOpenProjects, onOpenConversation, onRename, onPin, onDelete,
     onMoveProject, onMoveGroup, onMoveToTaskSection, onCreateGroupFor,
     onBulkMove, onCreateGroupForMany, onBulkDelete, onBulkPin, onSetFilter,
     onCreateGroup, onRenameGroup, onDeleteGroup,
   } = props;
+
+  const narrow = useNarrow();
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
@@ -102,9 +161,9 @@ export default function Sidebar(props: Props) {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
-  const toggleCollapsed = (key: string) => {
-    setCollapsed(cur => {
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(loadCollapsed);
+  const toggleSection = (key: string) => {
+    setCollapsedSections(cur => {
       const next = new Set(cur);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -119,17 +178,39 @@ export default function Sidebar(props: Props) {
   const [draftGroupName, setDraftGroupName] = useState("");
   const [groupMenuKey, setGroupMenuKey] = useState<string | null>(null);
 
+  // 拖宽：默认 ≈ 视口 30%，下限为旧默认宽度，上限 40%
+  const [width, setWidth] = useState<number>(loadWidth);
+  useEffect(() => {
+    try { localStorage.setItem(widthStore, String(width)); } catch { /* 忽略 */ }
+  }, [width]);
+  useEffect(() => {
+    const on = () => setWidth(w => clampWidth(w));
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  function startDrag(e: ReactMouseEvent) {
+    e.preventDefault();
+    const ac = new AbortController();
+    document.body.classList.add("side-resizing");
+    window.addEventListener("mousemove", ev => setWidth(clampWidth(ev.clientX)), { signal: ac.signal });
+    window.addEventListener("mouseup", () => { ac.abort(); document.body.classList.remove("side-resizing"); }, { signal: ac.signal });
+  }
+
   // “⋯”菜单与子菜单用 fixed 定位（按按钮 rect），不再被侧栏 overflow 裁掉
   const [menu, setMenu] = useState<{ c: Conversation; top: number; right: number } | null>(null);
   const [sub, setSub] = useState<{ type: "project" | "group"; top: number; left: number } | null>(null);
   const [subCreating, setSubCreating] = useState(false);
   const [subDraft, setSubDraft] = useState("");
 
-  // 右键自定义菜单（多选批量操作）：targets 为操作对象，ctxSub 为“添加至项目/移至分组”的二级菜单
+  // 右键自定义菜单（行或组别头部）：targets 为操作对象，ctxSub 为二级菜单
   const [ctx, setCtx] = useState<{ targets: Conversation[]; top: number; left: number } | null>(null);
   const [ctxSub, setCtxSub] = useState<{ type: "project" | "group"; top: number; left: number } | null>(null);
   const [ctxCreating, setCtxCreating] = useState(false);
   const [ctxDraft, setCtxDraft] = useState("");
+
+  // 收起态“最近”浮出面板（≤10 个最近更新会话）
+  const [recentOpen, setRecentOpen] = useState(false);
+  const [recentPos, setRecentPos] = useState({ top: 0, left: 0 });
 
   const rootGroups = useMemo(() => groups.filter(g => g.kind !== "task").slice().sort(byName), [groups]);
   const taskGroups = useMemo(() => groups.filter(g => g.kind === "task").slice().sort(byName), [groups]);
@@ -160,13 +241,19 @@ export default function Sidebar(props: Props) {
   }, [conversations, bucketKeyOf]);
   const B = (k: string) => buckets.get(k) ?? [];
 
+  const recentConvs = useMemo(
+    () => [...conversations].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 10),
+    [conversations],
+  );
+
   const closeMenu = () => { setMenu(null); setSub(null); setSubCreating(false); setSubDraft(""); };
   const closeCtx = () => { setCtx(null); setCtxSub(null); setCtxCreating(false); setCtxDraft(""); };
+  const closeAll = () => { closeMenu(); closeCtx(); setRecentOpen(false); setGroupMenuKey(null); };
 
-  // 菜单打开期间滚动/缩放视口先关闭，避免 fixed 菜单与行错位
+  // 菜单/浮层打开期间滚动或缩放视口先关闭，避免 fixed 元素错位
   useEffect(() => {
-    if (!menu && !ctx) return;
-    const close = () => { closeMenu(); closeCtx(); };
+    if (!menu && !ctx && !recentOpen) return;
+    const close = () => closeAll();
     window.addEventListener("scroll", close, true);
     window.addEventListener("resize", close);
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
@@ -176,7 +263,7 @@ export default function Sidebar(props: Props) {
       window.removeEventListener("resize", close);
       window.removeEventListener("keydown", onKey);
     };
-  }, [menu, ctx]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [menu, ctx, recentOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function openMenu(c: Conversation, el: HTMLElement) {
     const rect = el.getBoundingClientRect();
@@ -192,10 +279,18 @@ export default function Sidebar(props: Props) {
     setSubDraft("");
   }
 
-  /** 右键：多选且命中已选 → 作用于全部选中；否则仅作用于该行（多选模式下把该行变为唯一选中）。阻止浏览器原生菜单。 */
+  function showCtxAt(targets: Conversation[], x: number, y: number) {
+    if (targets.length === 0) return;
+    const left = Math.min(x, window.innerWidth - 196);
+    const top = Math.min(y, window.innerHeight - 240);
+    setCtx({ targets, top, left });
+    setCtxSub(null);
+    setCtxCreating(false);
+    setCtxDraft("");
+  }
+
+  /** 右键行：多选且命中已选 → 全部选中；否则仅该行。阻止浏览器原生菜单。 */
   function openCtx(c: Conversation, e: ReactMouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
     let targets: Conversation[];
     if (selectMode && selectedIds.has(c.id)) targets = conversations.filter(x => selectedIds.has(x.id));
     else {
@@ -203,17 +298,34 @@ export default function Sidebar(props: Props) {
       if (selectMode) setSelectedIds(new Set([c.id]));
     }
     if (targets.length === 0) return;
-    const left = Math.min(e.clientX, window.innerWidth - 196);
-    const top = Math.min(e.clientY, window.innerHeight - 240);
-    setCtx({ targets, top, left });
-    setCtxSub(null);
-    setCtxCreating(false);
-    setCtxDraft("");
+    e.preventDefault();
+    e.stopPropagation();
+    showCtxAt(targets, e.clientX, e.clientY);
+  }
+
+  /** 右键组别头部：对该组别（子组别）全部会话操作；多选模式下同步选中它们。 */
+  function openCtxSection(memberIds: number[], e: ReactMouseEvent) {
+    const set = new Set(memberIds);
+    const targets = conversations.filter(c => set.has(c.id));
+    if (targets.length === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (selectMode) setSelectedIds(new Set(memberIds));
+    showCtxAt(targets, e.clientX, e.clientY);
   }
 
   function openCtxSub(type: "project" | "group", el: HTMLElement) {
     const rect = el.getBoundingClientRect();
     setCtxSub({ type, top: rect.top - 4, left: Math.min(rect.right + 6, window.innerWidth - 236) });
+  }
+
+  function openRecent(el: HTMLElement) {
+    const rect = el.getBoundingClientRect();
+    setRecentPos({
+      top: Math.max(8, Math.min(rect.top, window.innerHeight - 460)),
+      left: Math.min(rect.right + 6, window.innerWidth - 280),
+    });
+    setRecentOpen(true);
   }
 
   function startEdit(c: Conversation) {
@@ -252,8 +364,7 @@ export default function Sidebar(props: Props) {
   function toggleSelectMode() {
     setSelectMode(v => !v);
     setSelectedIds(new Set());
-    closeMenu();
-    closeCtx();
+    closeAll();
   }
 
   const filterName = listFilter?.kind === "project"
@@ -292,6 +403,7 @@ export default function Sidebar(props: Props) {
         <button className="conv-title" title={c.title}
           onClick={() => (selectMode ? toggleSelect(c.id) : onOpenConversation(c))}
           onDoubleClick={() => startEdit(c)}>
+          <span className="conv-dot" aria-hidden />
           {generatingConvId === c.id && (
             <span className="conv-spinner" role="status" aria-label="正在生成" title="正在生成" />
           )}
@@ -329,12 +441,13 @@ export default function Sidebar(props: Props) {
     group?: ConvGroup; nested?: boolean;
   }) {
     const { sKey, label, memberIds, group, nested } = opts;
-    const isCollapsed = collapsed.has(sKey);
+    const isCollapsed = collapsedSections.has(sKey);
     return (
       <div className={`sec-head ${nested ? "nested" : ""}`} role="button" tabIndex={0} aria-expanded={!isCollapsed}
-        onClick={() => toggleCollapsed(sKey)}
+        onClick={() => toggleSection(sKey)}
+        onContextMenu={e => openCtxSection(memberIds, e)}
         onKeyDown={e => {
-          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleCollapsed(sKey); }
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSection(sKey); }
         }}>
         <span className="sec-caret">{isCollapsed ? "▸" : "▾"}</span>
         {selectMode && (
@@ -380,7 +493,7 @@ export default function Sidebar(props: Props) {
     return (
       <div key={sKey} className="conv-section">
         {renderSecHead({ sKey, label, memberIds: convs.map(c => c.id), group })}
-        {!collapsed.has(sKey) && <div className="sec-body">{convs.map(c => renderRow(c, sKey))}</div>}
+        {!collapsedSections.has(sKey) && <div className="sec-body">{convs.map(c => renderRow(c, sKey))}</div>}
       </div>
     );
   }
@@ -390,7 +503,7 @@ export default function Sidebar(props: Props) {
     return (
       <div key={sKey} className="conv-section">
         {renderSecHead({ sKey, label, memberIds: allConvs.map(c => c.id) })}
-        {!collapsed.has(sKey) && (
+        {!collapsedSections.has(sKey) && (
           <div className="sec-body">
             {children}
           </div>
@@ -408,7 +521,7 @@ export default function Sidebar(props: Props) {
     return (
       <div key={sKey} className="conv-subsection">
         {renderSecHead({ sKey, label: p.name, memberIds: convs.map(c => c.id), nested: true })}
-        {!collapsed.has(sKey) && <div className="sec-body sub">{convs.map(c => renderRow(c, sKey))}</div>}
+        {!collapsedSections.has(sKey) && <div className="sec-body sub">{convs.map(c => renderRow(c, sKey))}</div>}
       </div>
     );
   }
@@ -420,19 +533,17 @@ export default function Sidebar(props: Props) {
     return (
       <div key={sKey} className="conv-subsection">
         {renderSecHead({ sKey, label: g.name, memberIds: convs.map(c => c.id), group: g, nested: true })}
-        {!collapsed.has(sKey) && <div className="sec-body sub">{convs.map(c => renderRow(c, sKey))}</div>}
+        {!collapsedSections.has(sKey) && <div className="sec-body sub">{convs.map(c => renderRow(c, sKey))}</div>}
       </div>
     );
   }
 
-  const projectKeys = [...buckets.keys()].filter(k => k.startsWith("p:"));
-  const projectConvs = projectKeys.flatMap(k => B(k));
+  const projectConvs = [...buckets.keys()].filter(k => k.startsWith("p:")).flatMap(k => B(k));
   const taskBare = B("__taskbare");
   const taskConvsAll = [...taskBare, ...taskGroups.flatMap(g => B(`t:${g.id}`))];
-  // 项目子组别按名称排序（projects 已按置顶/更新时间排；此处按名称给子组别稳定顺序）
   const sortedProjectIds = projects.filter(p => B(`p:${p.id}`).length > 0).map(p => p.id);
 
-  // ---------- “移至分组”子菜单的可选目标（任务/普通不混用） ----------
+  // ---------- 移动目标计算（⋯菜单 与 右键菜单 共用规则：任务/普通不混用） ----------
 
   const menuConv = menu?.c ?? null;
   const menuIsTask = menuConv?.kind === "task";
@@ -440,7 +551,6 @@ export default function Sidebar(props: Props) {
   const projectLabel = menuConv?.project_id != null ? "更换项目" : "添加至项目";
   const groupLabel = menuConv?.group_id != null ? "更换分组" : "移至分组";
 
-  // 右键批量菜单的目标与“添加至项目 / 移至分组”显示条件：所有目标同(子)分组且同种类
   const ctxTargets = ctx?.targets ?? [];
   const ctxIds = ctxTargets.map(t => t.id);
   const ctxCanMove = ctxTargets.length > 0
@@ -451,14 +561,60 @@ export default function Sidebar(props: Props) {
   const ctxSameProject = ctxCanMove ? ctxTargets[0].project_id ?? null : null;
   const ctxSameGroup = ctxCanMove ? ctxTargets[0].group_id ?? null : null;
 
-  return <aside className="sidebar">
-    <div className="brand"><b className="mark">◉</b><div className="brand-word"><strong>Agent</strong><span>工作台</span></div></div>
-    <button className="new" onClick={() => { closeMenu(); closeCtx(); onNewChat(); }}>新聊天</button>
+  // ---------- 收起态：极致压缩的图标条 ----------
+
+  if (collapsed && !narrow) {
+    return <aside className="sidebar rail">
+      <button type="button" className="rail-mark" title="展开侧栏" aria-label="展开侧栏" onClick={() => onToggleCollapsed(false)}>
+        <b className="mark">◉</b>
+      </button>
+      <div className="rail-list">
+        <button type="button" className="rail-btn" title="新聊天" aria-label="新聊天" onClick={onNewChat}><PenIcon /></button>
+        <button type="button" className="rail-btn" title="搜索" aria-label="搜索" onClick={onOpenSearch}><SearchIcon /></button>
+        <button type="button" className={`rail-btn ${recentOpen ? "on" : ""}`} title="最近" aria-label="最近会话"
+          onClick={e => (recentOpen ? setRecentOpen(false) : openRecent(e.currentTarget))}><ClockIcon /></button>
+        <button type="button" className="rail-btn" title="项目" aria-label="项目" onClick={onOpenProjects}><FolderIcon /></button>
+      </div>
+      <div className="rail-foot">
+        <button type="button" className="rail-btn" title="展开侧栏" aria-label="展开侧栏" onClick={() => onToggleCollapsed(false)}>
+          <CollapseIcon flip />
+        </button>
+      </div>
+
+      {recentOpen && (
+        <>
+          <div className="menu-scrim" onClick={() => setRecentOpen(false)} onContextMenu={e => { e.preventDefault(); setRecentOpen(false); }} />
+          <div className="recent-panel fixed" style={{ top: recentPos.top, left: recentPos.left }}>
+            <div className="recent-head">最近</div>
+            {recentConvs.length === 0 && <div className="sub-empty">最近还没有会话</div>}
+            {recentConvs.map(c => (
+              <button key={c.id} type="button" className="recent-item" title={c.title}
+                onClick={() => { setRecentOpen(false); onOpenConversation(c); }}>
+                {c.pinned && "📌 "}{c.title}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </aside>;
+  }
+
+  // ---------- 展开态 ----------
+
+  return <aside className="sidebar" style={narrow ? undefined : { width, flexBasis: width }}>
+    <div className="brand">
+      <b className="mark">◉</b>
+      <div className="brand-word"><strong>Agent</strong><span>工作台</span></div>
+      <button type="button" className="side-collapse" title="收起侧栏" aria-label="收起侧栏" onClick={() => onToggleCollapsed(true)}>
+        <CollapseIcon />
+      </button>
+    </div>
+    <button className="new" onClick={() => { closeAll(); onNewChat(); }}>新聊天</button>
     <div className="side-actions">
-      <button type="button" className="side-action" onClick={() => { closeMenu(); closeCtx(); onOpenSearch(); }}>
+      <button type="button" className="side-action" onClick={() => { closeAll(); onOpenSearch(); }}>
         <SearchIcon /><span>搜索</span>
       </button>
-      <button type="button" className="side-action" onClick={() => { closeMenu(); closeCtx(); onOpenProjects(); }}>
+      <button type="button" className="side-action" onClick={() => { closeAll(); onOpenProjects(); }}>
         <FolderIcon /><span>项目</span>
         {projects.length > 0 && <em className="side-action-count">{projects.length}</em>}
       </button>
@@ -478,7 +634,7 @@ export default function Sidebar(props: Props) {
       <div className="conv-bulk-bar slim">
         <em>已选 {selectedIds.size}</em>
         <button type="button" disabled={!selectedIds.size} onClick={() => setSelectedIds(new Set())}>清空</button>
-        <span className="bulk-hint">右键选中项可批量操作</span>
+        <span className="bulk-hint">右键会话或组别可批量操作</span>
       </div>
     )}
 
@@ -524,6 +680,13 @@ export default function Sidebar(props: Props) {
         </>
       )}
     </nav>
+
+    <div className="side-foot"><span className="led" />本地运行</div>
+
+    {/* 拖宽把手（窄屏禁用） */}
+    {!narrow && (
+      <div className="side-resizer" role="separator" aria-orientation="vertical" title="拖动调整侧栏宽度" onMouseDown={startDrag} />
+    )}
 
     {/* 会话“⋯”菜单：fixed 定位，可越出侧栏，不再被裁切 */}
     {menu && menuConv && (
@@ -592,14 +755,14 @@ export default function Sidebar(props: Props) {
       </>
     )}
 
-    {/* 右键批量菜单（自定义，屏蔽浏览器原生菜单） */}
+    {/* 右键批量菜单（行 / 组别头部；自定义，屏蔽浏览器原生菜单） */}
     {ctx && ctxTargets.length > 0 && (
       <>
         <div className="menu-scrim" onClick={closeCtx} onContextMenu={e => { e.preventDefault(); closeCtx(); }} />
         <div className="conv-menu fixed" style={{ top: ctx.top, left: ctx.left, right: "auto" }}>
           <div className="ctx-title">{ctxIds.length > 1 ? `已选 ${ctxIds.length} 项` : ctxTargets[0].title}</div>
-          <button type="button" onClick={() => { closeCtx(); onBulkPin(ctxIds, true); }}>置顶</button>
-          <button type="button" onClick={() => { closeCtx(); onBulkPin(ctxIds, false); }}>取消置顶</button>
+          <button type="button" onClick={() => { closeCtx(); setSelectedIds(new Set()); onBulkPin(ctxIds, true); }}>置顶</button>
+          <button type="button" onClick={() => { closeCtx(); setSelectedIds(new Set()); onBulkPin(ctxIds, false); }}>取消置顶</button>
           {ctxCanMove && (
             <button type="button" className={ctxSub?.type === "project" ? "open" : ""}
               onMouseEnter={e => openCtxSub("project", e.currentTarget)}
@@ -614,7 +777,7 @@ export default function Sidebar(props: Props) {
               {ctxSameGroup != null ? "更换分组" : "移至分组"}
             </button>
           )}
-          <button type="button" className="danger" onClick={() => { closeCtx(); onBulkDelete(ctxIds); }}>删除</button>
+          <button type="button" className="danger" onClick={() => { closeCtx(); setSelectedIds(new Set()); onBulkDelete(ctxIds); }}>删除</button>
           {ctxIds.length > 1 && !ctxCanMove && (
             <div className="ctx-note">仅当所选在同一分组时可批量移动</div>
           )}
@@ -624,12 +787,12 @@ export default function Sidebar(props: Props) {
             {projects.length === 0 && <span className="sub-empty">暂无项目</span>}
             {projects.map(p => (
               <button key={p.id} type="button" className={ctxSameProject === p.id ? "cur" : ""}
-                onClick={() => { closeCtx(); if (ctxSameProject !== p.id) onBulkMove(ctxTargets, "project", p.id); }}>
+                onClick={() => { closeCtx(); setSelectedIds(new Set()); if (ctxSameProject !== p.id) onBulkMove(ctxTargets, "project", p.id); }}>
                 {p.pinned && "📌"}{p.name}{ctxSameProject === p.id && " ✓"}
               </button>
             ))}
             {ctxSameProject != null && (
-              <button type="button" onClick={() => { closeCtx(); onBulkMove(ctxTargets, "out-project"); }}>从项目中移除</button>
+              <button type="button" onClick={() => { closeCtx(); setSelectedIds(new Set()); onBulkMove(ctxTargets, "out-project"); }}>从项目中移除</button>
             )}
           </div>
         )}
@@ -640,15 +803,15 @@ export default function Sidebar(props: Props) {
             )}
             {ctxGroupTargets.map(g => (
               <button key={g.id} type="button" className={ctxSameGroup === g.id ? "cur" : ""}
-                onClick={() => { closeCtx(); if (ctxSameGroup !== g.id) onBulkMove(ctxTargets, "group", g.id); }}>
+                onClick={() => { closeCtx(); setSelectedIds(new Set()); if (ctxSameGroup !== g.id) onBulkMove(ctxTargets, "group", g.id); }}>
                 {g.name}{ctxSameGroup === g.id && " ✓"}
               </button>
             ))}
             {ctxIsTask && ctxCanMove && (ctxSameGroup != null || ctxSameProject != null) && (
-              <button type="button" onClick={() => { closeCtx(); onBulkMove(ctxTargets, "task"); }}>任务（直接归类）</button>
+              <button type="button" onClick={() => { closeCtx(); setSelectedIds(new Set()); onBulkMove(ctxTargets, "task"); }}>任务（直接归类）</button>
             )}
             {ctxSameGroup != null && (
-              <button type="button" onClick={() => { closeCtx(); onBulkMove(ctxTargets, "out-group"); }}>移出分组</button>
+              <button type="button" onClick={() => { closeCtx(); setSelectedIds(new Set()); onBulkMove(ctxTargets, "out-group"); }}>移出分组</button>
             )}
             <div className="sub-sep" />
             {ctxCreating ? (
@@ -659,6 +822,7 @@ export default function Sidebar(props: Props) {
                     e.preventDefault();
                     const name = ctxDraft.trim();
                     closeCtx();
+                    setSelectedIds(new Set());
                     if (name) onCreateGroupForMany(ctxTargets, name);
                   }
                   if (e.key === "Escape") setCtxCreating(false);
@@ -670,7 +834,5 @@ export default function Sidebar(props: Props) {
         )}
       </>
     )}
-
-    <div className="side-foot"><span className="led" />本地运行</div>
   </aside>;
 }

@@ -97,6 +97,13 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [listFilter, setListFilter] = useState<ListFilter>(null);
+  // v0.4.3：侧栏收起态（极致压缩图标条，保留 新聊天/搜索/最近/项目）
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem("sidebar.collapsed") === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("sidebar.collapsed", sidebarCollapsed ? "1" : "0"); } catch { /* 忽略存储失败 */ }
+  }, [sidebarCollapsed]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(false);
   // 应用内确认弹窗
@@ -759,6 +766,7 @@ export default function App() {
     <Sidebar
       conversations={conversations} projects={projects} groups={groups}
       activeId={activeId} generatingConvId={generatingConvId} listFilter={listFilter}
+      collapsed={sidebarCollapsed} onToggleCollapsed={setSidebarCollapsed}
       onNewChat={openHome}
       onOpenSearch={() => setSearchOpen(true)}
       onOpenProjects={() => setProjectsOpen(true)}
@@ -793,7 +801,7 @@ export default function App() {
         </div>
         <div className="topbar-meta">
           <span className="meta-item">模型 <b>DeepSeek</b></span>
-          <span className="meta-item">v0.4.3</span>
+          <span className="meta-item">v0.4.4</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
