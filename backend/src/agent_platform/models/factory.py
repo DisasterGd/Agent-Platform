@@ -1,7 +1,14 @@
-"""根据配置创建模型适配器。
+"""按角色创建模型适配器（v0.6 角色化配置）。
 
-模型配置优先级：用户设置（data/settings.json）> .env。前端设置页可改。
-新增模型（含未来多模态）时调用 register_model_provider 登记 builder；默认走 OpenAI 兼容接口。
+roles.reasoning → 主模型（对话/任务/工具循环/记忆提炼）
+roles.vision    → 视觉模型（识图：把附件图片描述为文本）
+roles.image_gen → 生图配置（generate_image 工具消费，不在此建 ChatModel）
+
+每个角色引用某个供应商档案的凭据（Base URL/Key），因此可以跨厂商组合——
+推理用 DeepSeek、识图用百炼、生图用智谱，各用各的 Key。未配置 API Key 时一律返回 None，
+由调用方回退到演示模式或提示未配置。
+
+新增原生供应商时调用 register_model_provider(name, builder) 登记；默认走 OpenAI 兼容接口。
 """
 from __future__ import annotations
 
@@ -12,58 +19,50 @@ from agent_platform.models.base import ChatModel
 from agent_platform.models.openai_compatible import OpenAICompatibleModel
 from agent_platform.services.settings_service import get_settings_service
 
-# name -> builder() -> ChatModel | None
-_providers: dict[str, Callable[[], ChatModel | None]] = {}
+# name -> builder(cfg: dict, temperature: float) -> ChatModel
+_providers: dict[str, Callable[[dict, float], ChatModel]] = {}
 
 
-def register_model_provider(name: str, builder: Callable[[], ChatModel | None]) -> None:
-    """登记一个模型供应商，供后续多模态/多模型切换使用。"""
+def register_model_provider(name: str, builder: Callable[[dict, float], ChatModel]) -> None:
+    """登记一个供应商的适配器构造器（未来原生协议/多模态在此接入）。"""
     _providers[name] = builder
 
 
-def _active_config() -> dict:
-    return get_settings_service().load()  # 兜底链（profile > .env > 预设）已在服务层做完
-
-
-def _build_openai_compatible() -> ChatModel | None:
-    cfg = _active_config()
-    if not cfg.get("api_key"):
-        return None
+def _default_builder(cfg: dict, temperature: float) -> ChatModel:
     return OpenAICompatibleModel(
-        base_url=cfg.get("base_url") or "",
+        base_url=cfg["base_url"],
         api_key=cfg["api_key"],
-        model=cfg.get("model") or "",
-        temperature=settings.llm_temperature,
+        model=cfg["model"],
+        temperature=temperature,
     )
 
 
-# 默认供应商：DeepSeek（OpenAI 兼容接口）。多模态模型可在其 provider 内部
-# 读取相应配置，并返回实现了 ChatModel 协议（含 images）的实例。
-register_model_provider("deepseek", _build_openai_compatible)
-register_model_provider("openai_compatible", _build_openai_compatible)
+register_model_provider("openai_compatible", _default_builder)
+
+
+def _build(role_cfg: dict | None, temperature: float) -> ChatModel | None:
+    if not role_cfg or not role_cfg.get("api_key"):
+        return None
+    builder = _providers.get(role_cfg["provider"]) or _providers["openai_compatible"]
+    return builder(role_cfg, temperature)
 
 
 def create_model(provider: str | None = None) -> ChatModel | None:
-    """未配置 API Key 时返回 None，由调用方回退到演示模式。"""
-    name = provider or settings.llm_provider
-    builder = _providers.get(name) or _providers.get("openai_compatible")
-    if builder is None:
-        return None
-    return builder()
+    """主模型（推理角色）。provider 仅为兼容旧调用保留，实际由 roles.reasoning 决定。"""
+    return _build(get_settings_service().resolve_role("reasoning"), settings.llm_temperature)
 
 
 def create_vision_model() -> ChatModel | None:
-    """视觉模型（用于识图）：与主模型同档案（同 Base URL/Key），仅模型名不同。未配置时返回 None。"""
-    cfg = _active_config()
-    vision_model = (cfg.get("vision_model") or "").strip()
-    if not vision_model or not cfg.get("api_key"):
+    """识图模型（视觉角色）。未配置或该供应商无 Key 时返回 None（附件图片将不被描述）。"""
+    return _build(get_settings_service().resolve_role("vision"), 0.0)
+
+
+def create_image_config() -> dict | None:
+    """生图角色配置 {base_url, api_key, model}；未配置返回 None（generate_image 工具据此提示）。"""
+    cfg = get_settings_service().resolve_role("image_gen")
+    if not cfg or not cfg.get("api_key"):
         return None
-    return OpenAICompatibleModel(
-        base_url=cfg.get("base_url") or "",
-        api_key=cfg["api_key"],
-        model=vision_model,
-        temperature=0.0,
-    )
+    return cfg
 
 
 def list_model_providers() -> list[str]:

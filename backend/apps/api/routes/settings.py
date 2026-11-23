@@ -18,13 +18,17 @@ router = APIRouter(tags=["settings"])
 
 
 class SettingsIn(BaseModel):
-    """PUT 载荷：provider 指定写入哪个供应商档案；api_key 语义见模块 docstring。"""
+    """PUT 载荷：provider+base_url+api_key 写凭据档案；roles 写角色（出现哪个键替换哪个）。
+
+    api_key 语义见模块 docstring；roles 值形如 {"provider":"qwen","model":"qwen3.8-omni-flash"} 或 null。
+    """
 
     provider: str = ""
     base_url: str | None = None
     api_key: str | None = None
     model: str | None = None
     vision_model: str | None = None
+    roles: dict | None = None
     memory_enabled: bool | None = None  # v0.4 自动记忆开关（None=保持当前值）
 
 
@@ -37,7 +41,12 @@ class DiscoverIn(BaseModel):
 
 def _view() -> dict:
     service = get_settings_service()
-    return {"config": service.public_config(), "profiles": service.profiles_view(), "presets": PRESETS}
+    return {
+        "config": service.public_config(),
+        "profiles": service.profiles_view(),
+        "roles": service.roles_view(),
+        "presets": PRESETS,
+    }
 
 
 @router.get("/settings")
