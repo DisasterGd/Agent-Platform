@@ -16,6 +16,11 @@ from agent_platform.tools.builtin.files import (
     GENERATE_FILE_PARAMETERS,
     generate_file,
 )
+from agent_platform.tools.builtin.images import (
+    GENERATE_IMAGE_DESCRIPTION,
+    GENERATE_IMAGE_PARAMETERS,
+    generate_image_tool,
+)
 from agent_platform.tools.builtin.search import (
     WEB_SEARCH_DESCRIPTION,
     WEB_SEARCH_PARAMETERS,
@@ -46,5 +51,9 @@ def build_default_registry() -> ToolRegistry:
     )
     registry.register(
         "create_zip", CREATE_ZIP_DESCRIPTION, CREATE_ZIP_PARAMETERS, create_zip
+    )
+    # v0.6：图像生成（走“生图角色”配置的供应商与模型，产物进资料库）
+    registry.register(
+        "generate_image", GENERATE_IMAGE_DESCRIPTION, GENERATE_IMAGE_PARAMETERS, generate_image_tool
     )
     return registry
