@@ -171,7 +171,7 @@ export default function SearchModal(props: Props) {
     : 0;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal wide" onClick={e => e.stopPropagation()}>
         <div className="modal-head">
           <span className="modal-title">搜索</span>

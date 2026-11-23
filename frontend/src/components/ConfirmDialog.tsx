@@ -23,7 +23,7 @@ export default function ConfirmDialog({ state, onClose }: Props) {
   }, [onClose]);
 
   return (
-    <div className="modal-overlay" onClick={() => onClose(false)}>
+    <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose(false); }}>
       <div className="modal confirm-modal" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="modal-head">
           <span className="modal-title">{state.title}</span>

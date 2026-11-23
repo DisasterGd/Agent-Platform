@@ -55,7 +55,7 @@ export default function ProjectsModal(props: Props) {
   const convsIn = (id: number) => conversations.filter(c => c.project_id === id);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal xwide" onClick={e => e.stopPropagation()}>
         <div className="modal-head">
           <span className="modal-title">项目</span>
