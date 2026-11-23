@@ -3,6 +3,7 @@ import { chatApi, type StreamHandlers } from "./services/chat";
 import { tasksApi } from "./services/tasks";
 import { projectsApi } from "./services/projects";
 import { groupsApi } from "./services/groups";
+import { settingsApi } from "./services/settings";
 import Markdown from "./components/Markdown";
 import SettingsModal from "./components/SettingsModal";
 import ConfirmDialog, { type ConfirmState } from "./components/ConfirmDialog";
@@ -89,6 +90,19 @@ export default function App() {
     catch { return "light"; }
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // v0.5.2 模型指示（顶栏 + 欢迎卡）：读真实生效配置（永不含 Key），保存设置后刷新——修“一直显示 DeepSeek”的旧 bug
+  const [modelNote, setModelNote] = useState("加载中…");
+  const refreshModelNote = useCallback(() => {
+    settingsApi.get()
+      .then(r => {
+        const preset = r.presets[r.config.provider];
+        const label = preset?.label || r.config.provider || "自定义";
+        const model = r.config.model || preset?.model || "默认模型";
+        setModelNote(r.config.has_api_key ? `${label} · ${model}` : "本地演示（未配置 Key）");
+      })
+      .catch(() => setModelNote("未知"));
+  }, []);
+  useEffect(() => { refreshModelNote(); }, [refreshModelNote]);
   // v0.4.1 双界面：聊天 / 任务。切换只换主区，左侧信息栏不变。
   const [mode, setMode] = useState<ViewMode>(() => {
     try { return localStorage.getItem("app.mode") === "task" ? "task" : "chat"; }
@@ -807,8 +821,8 @@ export default function App() {
           <div className="topbar-title">{mode === "task" ? "任务中心" : activeConv?.title ?? "主界面"}</div>
         </div>
         <div className="topbar-meta">
-          <span className="meta-item">模型 <b>DeepSeek</b></span>
-          <span className="meta-item">v0.5.1</span>
+          <span className="meta-item" data-tip="当前生效的模型配置（设置页可改）">模型 <b>{modelNote}</b></span>
+          <span className="meta-item">v0.5.2</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
@@ -842,7 +856,7 @@ export default function App() {
                 需要多步骤的工作时，点顶栏的<b>任务</b>切到任务界面，把目标拆成计划、审阅后逐步执行。
                 它还会随着交流逐渐<b>记住你的偏好</b>——在“设置 → 记忆”中随时查看与管理。</p>
                 <div className="panel">
-                  <div className="panel-cell"><span>模型</span><b>DeepSeek</b></div>
+                  <div className="panel-cell"><span>模型</span><b>{modelNote}</b></div>
                   <div className="panel-cell"><span>工具</span><b>搜索 · 文档 · 代码 · 压缩包 · 记忆</b></div>
                   <div className="panel-cell"><span>资料</span><b>侧边栏「资料库」统一查看</b></div>
                 </div>
@@ -1033,7 +1047,7 @@ export default function App() {
       />
     )}
     {settingsOpen && (
-      <SettingsModal theme={theme} onThemeChange={setTheme} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal theme={theme} onThemeChange={setTheme} onClose={() => { setSettingsOpen(false); refreshModelNote(); }} />
     )}
     {confirmState && <ConfirmDialog state={confirmState} onClose={closeConfirm} />}
     <GlobalTip />
