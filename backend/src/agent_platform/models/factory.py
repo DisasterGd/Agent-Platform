@@ -22,18 +22,17 @@ def register_model_provider(name: str, builder: Callable[[], ChatModel | None]) 
 
 
 def _active_config() -> dict:
-    return get_settings_service().load()
+    return get_settings_service().load()  # 兜底链（profile > .env > 预设）已在服务层做完
 
 
 def _build_openai_compatible() -> ChatModel | None:
     cfg = _active_config()
-    api_key = cfg.get("api_key") or settings.llm_api_key
-    if not api_key:
+    if not cfg.get("api_key"):
         return None
     return OpenAICompatibleModel(
-        base_url=cfg.get("base_url") or settings.llm_base_url,
-        api_key=api_key,
-        model=cfg.get("model") or settings.llm_model,
+        base_url=cfg.get("base_url") or "",
+        api_key=cfg["api_key"],
+        model=cfg.get("model") or "",
         temperature=settings.llm_temperature,
     )
 
@@ -54,15 +53,14 @@ def create_model(provider: str | None = None) -> ChatModel | None:
 
 
 def create_vision_model() -> ChatModel | None:
-    """视觉模型（用于识图）。未配置 vision_model 时返回 None。"""
+    """视觉模型（用于识图）：与主模型同档案（同 Base URL/Key），仅模型名不同。未配置时返回 None。"""
     cfg = _active_config()
     vision_model = (cfg.get("vision_model") or "").strip()
-    api_key = cfg.get("api_key") or settings.llm_api_key
-    if not vision_model or not api_key:
+    if not vision_model or not cfg.get("api_key"):
         return None
     return OpenAICompatibleModel(
-        base_url=cfg.get("base_url") or settings.llm_base_url,
-        api_key=api_key,
+        base_url=cfg.get("base_url") or "",
+        api_key=cfg["api_key"],
         model=vision_model,
         temperature=0.0,
     )
