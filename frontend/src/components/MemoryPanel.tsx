@@ -56,9 +56,8 @@ export default function MemoryPanel() {
     setMemoryEnabled(v);
     if (!fullConfig) return;
     try {
-      const next = { ...fullConfig, memory_enabled: v };
-      await settingsApi.save(next);
-      setFullConfig(next);
+      // v0.5.2：只回传 provider+开关即可——api_key 字段缺省=服务器保留现有档案与 Key
+      await settingsApi.save({ provider: fullConfig.provider, memory_enabled: v });
     } catch (e) {
       setError(e instanceof Error ? e.message : "保存开关失败");
     }
