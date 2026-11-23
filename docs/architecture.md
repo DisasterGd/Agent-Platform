@@ -50,11 +50,18 @@ v0.4.1 工作台结构：
   原样写出文本/代码/配置（文件名即用途声明）；`create_zip` 打包多文件（内联内容 + 引用本轮已生成的文件）。
   后两者都受服务端校验：后缀白名单、路径清洗（拒绝绝对路径与 `..`）、体积与条目上限。
 
-模型配置（v0.2 预设起步 → v0.5.1 增强，v0.6 多模型管理的前身）：
-- **两级配置，单一事实来源是设置页**：`data/settings.json`（每次请求读取，改完即生效）优先于 `.env`（启动时加载，作兜底）；
-  两处都没 API Key 时回退本地演示模式。API Key 目前**明文**存于 settings.json（`data/` 已 gitignore），加密存储留待 v0.7/v0.8 与账号体系统一考虑。
-- **预设 = 2026-11 在服型号的精选清单**（`PRESETS.models` / `vision_models` 即设置页下拉候选）；
-  `POST /api/settings/discover-models` 可向**用户自己填写的** Base URL 发 OpenAI 兼容 `GET /models`，实测该 Key 实时可调用列表并并入下拉——
-  预设清单过期也不影响可用性，这就是“随官方同步”的零维护通道。
+模型配置（v0.2 预设起步 → v0.5.1 增强 → v0.5.2 档案隔离与加密，v0.6 多模型管理的前身）：
+- **按供应商隔离的档案（profiles）**：`data/settings.json` 存 `{active, profiles: {每家 base_url/api_key/model/vision_model}}`，
+  切供应商=切换编辑对象，互不覆写；生效优先级：active 档案 > .env（仅当 active 与 `LLM_PROVIDER` 同一家才兜底，
+  杜绝把 DeepSeek 的 Key 串到百炼端点）> 预设默认。设置页改动每次请求现读现生效，`.env` 改动需重启。
+- **API Key 加密且不回显**：落盘经 Windows DPAPI（`infrastructure/secret_store`，`enc:v1:` 前缀，无第三方依赖；非 Windows 暂透传，
+  留待 v0.7/v0.8 与账号体系统一）；HTTP 层只回 `has_api_key` 布尔，保存时 api_key 缺省=保留、空串=清除、非空=替换；
+  v1 旧文件（单配置+明文）读取时透明迁移、下一次保存写成 v2。前端 Key 输入框用固定长度掩码（长度不泄露，复制只得占位文本）。
+- **下拉候选与实时探测**：`PRESETS.models/vision_models` 是 2026-11 按官方文档核对的精选清单（自绘下拉展开即列全部，
+  不再用会被“按现值过滤”的原生 datalist）；`POST /api/settings/discover-models` 向**用户填写或已存的** Base URL 发 OpenAI 兼容
+  `GET /models`，实时返回该 Key 可调用列表并入下拉——清单漂移时以此兜底，这就是“随官方同步”的零维护通道。
+  注意 `/models` 不标注模态、常混入非视觉资源，所以**视觉候选只列精选清单**（自定义供应商除外）；模型名必须逐字符精确（大小写/`.`/`-`），
+  填错服务端会明确报错而非静默换模型；同一模型在不同平台 id 可能不同（官方 `deepseek-flash` = 百炼托管 `deepseek-v4.1-flash-1017`）。
 - **视觉模型是独立角色的 ChatModel（识图）**：`_enrich` 阶段用 `create_vision_model()` 把图片描述为中文文本、拼进用户消息，
-  主模型（可为纯文本模型）再带着这段描述进入工具循环——一轮之内“识图 → 推理”**顺序协作**，并非多模型并行；二者共用同一 Base URL 与 Key。
+  主模型（可为纯文本模型）再带着这段描述进入工具循环——一轮之内“识图 → 推理”**顺序协作**，并非多模型并行；当前二者共用同一档案的 Base URL 与 Key。
+  跨厂商角色化编排（识图/生图/视频用别家模型）是 v0.6 下一步：profiles 是它的地基，还缺 roles→{provider, model} 配置与按角色取模型的工厂。
