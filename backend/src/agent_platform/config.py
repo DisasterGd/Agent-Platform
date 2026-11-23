@@ -18,10 +18,12 @@ class Settings(BaseSettings):
 
     # 大模型（OpenAI 兼容接口，默认指向 DeepSeek）
     # llm_provider 用于在 models.factory 中选择适配器，未来多模态模型在此登记。
+    # llm_model 仅作 .env 兜底：设置页（data/settings.json）优先。deepseek-chat 已下线，
+    # 2026-11 官方在服：deepseek-flash（V4.1-Flash，原生视觉）/ deepseek-v4-pro（纯文本）。
     llm_provider: str = "deepseek"
     llm_base_url: str = "https://api.deepseek.com"
     llm_api_key: str = ""
-    llm_model: str = "deepseek-chat"
+    llm_model: str = "deepseek-flash"
     llm_temperature: float = 0.7
 
     # 联网搜索（tools/builtin/search.py 调用）
