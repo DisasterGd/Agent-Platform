@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { Conversation, ConvGroup, Project } from "../types/chat";
 
-/** 列表过滤：项目弹窗/搜索结果选定后把侧栏会话列表收拢到某个项目或分组。 */
+/** 列表过滤：项目弹窗/搜索结果选定后把侧边栏会话列表收拢到某个项目或分组。 */
 export type ListFilter = { kind: "project" | "group"; id: number } | null;
 
 interface Props {
@@ -43,11 +43,13 @@ interface Props {
 }
 
 const collapsedStore = "sidebar.collapsedSections";
-// v0.4.5：默认宽度改为 ≈20% 视口（v0.4.4 的 30% 在高分屏上过宽），存储键升版使旧值作废
-const widthStore = "sidebar.width.v2";
-const DEFAULT_RATIO = 0.2;
+// v0.5.1：默认宽度调为 ≈25% 视口（v0.4.5 的 20% 经对比偏窄），存储键升版使旧值作废
+const widthStore = "sidebar.width.v3";
+const DEFAULT_RATIO = 0.25;
 /** 拉伸下限 = v0.4.2 之前的默认宽度；上限与收起态在 clamp 中按视口计算。 */
 const MIN_WIDTH = 246;
+/** 拖拽越界收起缓冲：宽度已到下限后，再向左拖超过该像素数视为“继续收缩”→ 收起侧边栏。 */
+const COLLAPSE_SLACK = 32;
 
 function loadCollapsed(): Set<string> {
   try {
@@ -193,7 +195,7 @@ export default function Sidebar(props: Props) {
   const [draftGroupName, setDraftGroupName] = useState("");
   const [groupMenuKey, setGroupMenuKey] = useState<string | null>(null);
 
-  // 拖宽：默认 ≈ 视口 20%，下限为旧默认宽度 246px，上限 40%
+  // 拖宽：默认 ≈ 视口 25%，下限为旧默认宽度 246px，上限 40%；越过下限继续左拖则收起
   const [width, setWidth] = useState<number>(loadWidth);
   useEffect(() => {
     try { localStorage.setItem(widthStore, String(width)); } catch { /* 忽略 */ }
@@ -207,11 +209,16 @@ export default function Sidebar(props: Props) {
     e.preventDefault();
     const ac = new AbortController();
     document.body.classList.add("side-resizing");
-    window.addEventListener("mousemove", ev => setWidth(clampWidth(ev.clientX)), { signal: ac.signal });
-    window.addEventListener("mouseup", () => { ac.abort(); document.body.classList.remove("side-resizing"); }, { signal: ac.signal });
+    const stop = () => { ac.abort(); document.body.classList.remove("side-resizing"); };
+    window.addEventListener("mousemove", ev => {
+      // 已在最低阈值还继续向左收缩（越过缓冲）→ 与点“收起侧边栏”同样效果
+      if (ev.clientX < MIN_WIDTH - COLLAPSE_SLACK) { stop(); onToggleCollapsed(true); return; }
+      setWidth(clampWidth(ev.clientX));
+    }, { signal: ac.signal });
+    window.addEventListener("mouseup", stop, { signal: ac.signal });
   }
 
-  // “⋯”菜单与子菜单用 fixed 定位（按按钮 rect），不再被侧栏 overflow 裁掉
+  // “⋯”菜单与子菜单用 fixed 定位（按按钮 rect），不再被侧边栏 overflow 裁掉
   const [menu, setMenu] = useState<{ c: Conversation; top: number; right: number } | null>(null);
   const [sub, setSub] = useState<{ type: "project" | "group"; top: number; left: number } | null>(null);
   const [subCreating, setSubCreating] = useState(false);
@@ -580,7 +587,7 @@ export default function Sidebar(props: Props) {
 
   if (collapsed && !narrow) {
     return <aside className="sidebar rail">
-      <button type="button" className="rail-mark" data-tip="展开侧栏" aria-label="展开侧栏" onClick={() => onToggleCollapsed(false)}>
+      <button type="button" className="rail-mark" data-tip="展开侧边栏" aria-label="展开侧边栏" onClick={() => onToggleCollapsed(false)}>
         <b className="mark">◉</b>
       </button>
       <div className="rail-list">
@@ -592,7 +599,7 @@ export default function Sidebar(props: Props) {
         <button type="button" className="rail-btn" data-tip="资料库" aria-label="资料库" onClick={onOpenLibrary}><LibraryIcon /></button>
       </div>
       <div className="rail-foot">
-        <button type="button" className="rail-btn" data-tip="展开侧栏" aria-label="展开侧栏" onClick={() => onToggleCollapsed(false)}>
+        <button type="button" className="rail-btn" data-tip="展开侧边栏" aria-label="展开侧边栏" onClick={() => onToggleCollapsed(false)}>
           <CollapseIcon flip />
         </button>
       </div>
@@ -621,7 +628,7 @@ export default function Sidebar(props: Props) {
     <div className="brand">
       <b className="mark">◉</b>
       <div className="brand-word"><strong>Agent</strong><span>工作台</span></div>
-      <button type="button" className="side-collapse" data-tip="收起侧栏" aria-label="收起侧栏" onClick={() => onToggleCollapsed(true)}>
+      <button type="button" className="side-collapse" data-tip="收起侧边栏" aria-label="收起侧边栏" onClick={() => onToggleCollapsed(true)}>
         <CollapseIcon />
       </button>
     </div>
@@ -704,10 +711,10 @@ export default function Sidebar(props: Props) {
 
     {/* 拖宽把手（窄屏禁用） */}
     {!narrow && (
-      <div className="side-resizer" role="separator" aria-orientation="vertical" data-tip="拖动调整侧栏宽度" onMouseDown={startDrag} />
+      <div className="side-resizer" role="separator" aria-orientation="vertical" data-tip="拖动调整侧边栏宽度；拖到最窄后继续向左可收起" onMouseDown={startDrag} />
     )}
 
-    {/* 会话“⋯”菜单：fixed 定位，可越出侧栏，不再被裁切 */}
+    {/* 会话“⋯”菜单：fixed 定位，可越出侧边栏，不再被裁切 */}
     {menu && menuConv && (
       <>
         <div className="menu-scrim" onClick={closeMenu} onContextMenu={e => { e.preventDefault(); closeMenu(); }} />

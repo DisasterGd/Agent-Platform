@@ -76,7 +76,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   // 思考过程动态展示（仅内存态，不落库；完成后虚化再移除）
   const thinking = useThinkingTracker();
-  // 正在生成的会话 id：侧栏该行显示转圈动画
+  // 正在生成的会话 id：侧边栏该行显示转圈动画
   const [generatingConvId, setGeneratingConvId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [copiedId, setCopiedId] = useState<number | null>(null);
@@ -101,7 +101,7 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [listFilter, setListFilter] = useState<ListFilter>(null);
-  // v0.4.3：侧栏收起态（极致压缩图标条，保留 新聊天/搜索/最近/项目）
+  // v0.4.3：侧边栏收起态（极致压缩图标条，保留 新聊天/搜索/最近/项目）
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem("sidebar.collapsed") === "1"; } catch { return false; }
   });
@@ -616,7 +616,7 @@ export default function App() {
         patchTask(taskId, t => ({ ...t, status: "running", steps: ev.steps ?? t.steps }));
         const cid = ev.conversation_id ?? null;
         if (cid !== null) {
-          // 执行开始即绑定/新建会话：侧栏立刻可见，失败也有记录可回看
+          // 执行开始即绑定/新建会话：侧边栏立刻可见，失败也有记录可回看
           setGeneratingConvId(cid);
           void refresh().catch(() => undefined);
         }
@@ -808,7 +808,7 @@ export default function App() {
         </div>
         <div className="topbar-meta">
           <span className="meta-item">模型 <b>DeepSeek</b></span>
-          <span className="meta-item">v0.5.0</span>
+          <span className="meta-item">v0.5.1</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
@@ -844,7 +844,7 @@ export default function App() {
                 <div className="panel">
                   <div className="panel-cell"><span>模型</span><b>DeepSeek</b></div>
                   <div className="panel-cell"><span>工具</span><b>搜索 · 文档 · 代码 · 压缩包 · 记忆</b></div>
-                  <div className="panel-cell"><span>资料</span><b>侧栏「资料库」统一查看</b></div>
+                  <div className="panel-cell"><span>资料</span><b>侧边栏「资料库」统一查看</b></div>
                 </div>
               </div>
             : <div className="messages">{turns.map((t, ti) => {
