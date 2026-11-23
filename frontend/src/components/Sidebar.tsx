@@ -43,12 +43,13 @@ interface Props {
 }
 
 const collapsedStore = "sidebar.collapsedSections";
-// v0.5.1：默认宽度调为 ≈25% 视口（v0.4.5 的 20% 经对比偏窄），存储键升版使旧值作废
-const widthStore = "sidebar.width.v3";
-const DEFAULT_RATIO = 0.25;
-/** 拉伸下限 = v0.4.2 之前的默认宽度；上限与收起态在 clamp 中按视口计算。 */
-const MIN_WIDTH = 246;
-/** 拖拽越界收起缓冲：宽度已到下限后，再向左拖超过该像素数视为“继续收缩”→ 收起侧边栏。 */
+// v0.5.2：默认宽度 ≈15% 视口；**不再记忆拖宽**（sidebar.width.* 旧存储作废），每次启动回到默认位置
+const DEFAULT_RATIO = 0.15;
+/** 拉伸下限：按“分区头与操作行不碎裂”定 192px（15% 视口在 1366 宽屏上也才 ≈205px，旧 246px 下限会顶穿默认值）。 */
+const MIN_WIDTH = 192;
+/** 拉伸上限：视口 32%（v0.4.4 的 40% 过宽：超过 1/3 后主区被挤得不成比例）。 */
+const MAX_RATIO = 0.32;
+/** 拖拽越界收起缓冲：宽度到下限后再向左超过该像素数，视为“继续收缩”→ 收起侧边栏。 */
 const COLLAPSE_SLACK = 32;
 
 function loadCollapsed(): Set<string> {
@@ -61,15 +62,11 @@ function loadCollapsed(): Set<string> {
 }
 
 function clampWidth(w: number): number {
-  const max = Math.round(window.innerWidth * 0.4);
+  const max = Math.round(window.innerWidth * MAX_RATIO);
   return Math.min(Math.max(w, MIN_WIDTH), Math.max(max, MIN_WIDTH));
 }
 
-function loadWidth(): number {
-  try {
-    const saved = Number(localStorage.getItem(widthStore));
-    if (Number.isFinite(saved) && saved >= MIN_WIDTH) return clampWidth(saved);
-  } catch { /* 忽略 */ }
+function defaultWidth(): number {
   return clampWidth(Math.round(window.innerWidth * DEFAULT_RATIO));
 }
 
@@ -195,11 +192,8 @@ export default function Sidebar(props: Props) {
   const [draftGroupName, setDraftGroupName] = useState("");
   const [groupMenuKey, setGroupMenuKey] = useState<string | null>(null);
 
-  // 拖宽：默认 ≈ 视口 25%，下限为旧默认宽度 246px，上限 40%；越过下限继续左拖则收起
-  const [width, setWidth] = useState<number>(loadWidth);
-  useEffect(() => {
-    try { localStorage.setItem(widthStore, String(width)); } catch { /* 忽略 */ }
-  }, [width]);
+  // 拖宽：默认 ≈ 视口 15%（v0.5.2 起不记忆，每次启动回默认），下限 192px、上限 32%；越过下限继续左拖则收起
+  const [width, setWidth] = useState<number>(defaultWidth);
   useEffect(() => {
     const on = () => setWidth(w => clampWidth(w));
     window.addEventListener("resize", on);
