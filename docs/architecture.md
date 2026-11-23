@@ -11,7 +11,7 @@ Services (业务用例: chat_service · task_service · project_service · group
        v                                   v
 Agent Core（agent 工具循环 · planner · runner · context · events）
 Memory（v0.4: manager 门面 · conversation 压缩 · long_term 提炼/注入）
-Models / Tools / Infrastructure(search · generation · storage · attachments · filetypes 类型词典 · model_discovery 模型探测)
+Models / Tools / Infrastructure(search · generation · storage · attachments · filetypes 类型词典 · model_discovery 模型探测 · imagegen 生图端点 · secret_store Key 加密)
        v
 Repositories（唯一 DB 访问）
        v
@@ -50,18 +50,25 @@ v0.4.1 工作台结构：
   原样写出文本/代码/配置（文件名即用途声明）；`create_zip` 打包多文件（内联内容 + 引用本轮已生成的文件）。
   后两者都受服务端校验：后缀白名单、路径清洗（拒绝绝对路径与 `..`）、体积与条目上限。
 
-模型配置（v0.2 预设起步 → v0.5.1 增强 → v0.5.2 档案隔离与加密，v0.6 多模型管理的前身）：
-- **按供应商隔离的档案（profiles）**：`data/settings.json` 存 `{active, profiles: {每家 base_url/api_key/model/vision_model}}`，
-  切供应商=切换编辑对象，互不覆写；生效优先级：active 档案 > .env（仅当 active 与 `LLM_PROVIDER` 同一家才兜底，
-  杜绝把 DeepSeek 的 Key 串到百炼端点）> 预设默认。设置页改动每次请求现读现生效，`.env` 改动需重启。
+模型配置（v0.2 预设起步 → v0.5.1 增强 → v0.5.2 档案隔离与加密 → v0.6 角色化多厂商）：
+- **profiles = 凭据**：`data/settings.json` 每家各自 `{base_url, api_key(密文)}`（v2 遗留的 model/vision_model 字段读取兼容），
+  切供应商=切换编辑对象，互不覆写；.env 兜底只对 `LLM_PROVIDER` 同一家生效，杜绝把 DeepSeek 的 Key 串到百炼端点。
+  设置页改动每次请求现读现生效，`.env` 改动需重启。
 - **API Key 加密且不回显**：落盘经 Windows DPAPI（`infrastructure/secret_store`，`enc:v1:` 前缀，无第三方依赖；非 Windows 暂透传，
-  留待 v0.7/v0.8 与账号体系统一）；HTTP 层只回 `has_api_key` 布尔，保存时 api_key 缺省=保留、空串=清除、非空=替换；
-  v1 旧文件（单配置+明文）读取时透明迁移、下一次保存写成 v2。前端 Key 输入框用固定长度掩码（长度不泄露，复制只得占位文本）。
+  留待 v0.7/v0.8 与账号体系统一）；HTTP 层只回 `has_api_key`/`usable` 布尔，保存时 api_key 缺省=保留、空串=清除、非空=替换；
+  v1 旧文件（单配置+明文）读取时透明迁移、下一次保存写成 v3。前端 Key 输入框用固定长度掩码（长度不泄露，复制只得占位文本）。
+- **v0.6 角色化（roles）——凭据与分工两层分离**：`settings.json` v3 里 `profiles` 只存各家凭据（base_url/api_key），
+  `roles` 决定谁干哪类活——`reasoning`（对话/任务/工具循环/记忆）、`vision`（识图描述，可空）、`image_gen`（生图，可空），
+  每个角色引用某家档案，因此可跨厂商组合且各用各的 Key；模型名解析：role.model > .env（仅 reasoning 且同供应商）> 预设默认。
+  v2 旧文件（active+model 语义）读取时自动派生等价 roles，行为不变。
+  `factory.create_model()/create_vision_model()` 按角色装配 `ChatModel`，`create_image_config()` 供工具取生图配置；
+  `generate_image` 工具走 `infrastructure/imagegen`（OpenAI 兼容 `POST {base}/images/generations`，b64_json/url 双形状，
+  url 仅 https 代取、10MB 上限），产物经 `ToolResult.artifacts` 由服务层登记资料库。
 - **下拉候选与实时探测**：`PRESETS.models/vision_models` 是 2026-11 按官方文档核对的精选清单（自绘下拉展开即列全部，
   不再用会被“按现值过滤”的原生 datalist）；`POST /api/settings/discover-models` 向**用户填写或已存的** Base URL 发 OpenAI 兼容
   `GET /models`，实时返回该 Key 可调用列表并入下拉——清单漂移时以此兜底，这就是“随官方同步”的零维护通道。
   注意 `/models` 不标注模态、常混入非视觉资源，所以**视觉候选只列精选清单**（自定义供应商除外）；模型名必须逐字符精确（大小写/`.`/`-`），
   填错服务端会明确报错而非静默换模型；同一模型在不同平台 id 可能不同（官方 `deepseek-flash` = 百炼托管 `deepseek-v4.1-flash-1017`）。
-- **视觉模型是独立角色的 ChatModel（识图）**：`_enrich` 阶段用 `create_vision_model()` 把图片描述为中文文本、拼进用户消息，
-  主模型（可为纯文本模型）再带着这段描述进入工具循环——一轮之内“识图 → 推理”**顺序协作**，并非多模型并行；当前二者共用同一档案的 Base URL 与 Key。
-  跨厂商角色化编排（识图/生图/视频用别家模型）是 v0.6 下一步：profiles 是它的地基，还缺 roles→{provider, model} 配置与按角色取模型的工厂。
+- **识图仍是“顺序协作”而非并行**：`_enrich` 阶段用 `create_vision_model()`（**引用识图角色自己的供应商凭据**，可与主模型不同家）
+  把图片描述为中文文本、拼进用户消息，主模型（可为纯文本模型）再带着这段描述进入工具循环。
+  已知局限：描述只拼进**当轮**上下文，历史消息库里存的是原始内容，隔轮后早期附件的正文/描述不在上下文中（待后续版本处理）。
