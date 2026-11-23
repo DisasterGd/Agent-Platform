@@ -25,25 +25,39 @@ export interface Preset {
   model: string;
   vision_model: string;
   api_url: string;
-  /** “模型/视觉模型”下拉候选（输入框仍可手输任意名称） */
+  /** 三个角色的下拉候选（输入框仍可手输任意名称） */
   models?: string[];
   vision_models?: string[];
+  image_models?: string[];
+}
+
+/** v0.6 角色：谁干哪类活（引用某供应商档案的凭据）。model 可空，解析时用预设默认兜底。 */
+export type RoleKey = "reasoning" | "vision" | "image_gen";
+
+export interface RoleDraft {
+  provider: string;
+  model: string;
+}
+
+/** 服务端角色视图：usable=所引供应商是否已有 Key。 */
+export interface RoleConfig extends RoleDraft {
+  usable: boolean;
 }
 
 export interface SettingsResponse {
   config: ModelConfig;
   profiles: Record<string, ProfileView>;
+  roles: Record<RoleKey, RoleConfig | null>;
   presets: Record<string, Preset>;
 }
 
-/** PUT 载荷：api_key 缺省/null=保留现有，""=清除，非空=替换（写入 provider 自己的档案）。 */
+/** PUT 载荷：api_key 缺省/null=保留现有，""=清除，非空=替换；roles 出现的键整体替换对应角色。 */
 export interface SettingsPayload {
   provider: string;
   base_url?: string | null;
   api_key?: string | null;
-  model?: string | null;
-  vision_model?: string | null;
   memory_enabled?: boolean | null;
+  roles?: Record<RoleKey, RoleDraft | null> | null;
 }
 
 export const settingsApi = {

@@ -90,15 +90,19 @@ export default function App() {
     catch { return "light"; }
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // v0.5.2 模型指示（顶栏 + 欢迎卡）：读真实生效配置（永不含 Key），保存设置后刷新——修“一直显示 DeepSeek”的旧 bug
+  // v0.6.0 模型指示（顶栏 + 欢迎卡）：读真实生效配置（永不含 Key），保存设置后刷新
+  // v0.6.0 起以“主模型角色”为准——它才决定实际对话用的是哪家哪个模型
   const [modelNote, setModelNote] = useState("加载中…");
   const refreshModelNote = useCallback(() => {
     settingsApi.get()
       .then(r => {
-        const preset = r.presets[r.config.provider];
-        const label = preset?.label || r.config.provider || "自定义";
-        const model = r.config.model || preset?.model || "默认模型";
-        setModelNote(r.config.has_api_key ? `${label} · ${model}` : "本地演示（未配置 Key）");
+        const reasoning = r.roles?.reasoning ?? null;
+        const pid = reasoning?.provider || r.config.provider || "deepseek";
+        const preset = r.presets[pid];
+        const label = preset?.label || pid || "自定义";
+        const model = reasoning?.model || r.config.model || preset?.model || "默认模型";
+        const usable = reasoning ? reasoning.usable : r.config.has_api_key;
+        setModelNote(usable ? `${label} · ${model}` : "本地演示（主模型未就绪）");
       })
       .catch(() => setModelNote("未知"));
   }, []);
@@ -822,7 +826,7 @@ export default function App() {
         </div>
         <div className="topbar-meta">
           <span className="meta-item" data-tip="当前生效的模型配置（设置页可改）">模型 <b>{modelNote}</b></span>
-          <span className="meta-item">v0.5.2</span>
+          <span className="meta-item">v0.6.0</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
