@@ -202,27 +202,36 @@ export default function Sidebar(props: Props) {
     window.addEventListener("resize", on);
     return () => window.removeEventListener("resize", on);
   }, []);
+  /**
+   * v0.6.2 统一拖拽把手：一次按住可从 图标条 → 最小宽 → 最大宽 全程连续，状态切换不再中断拖拽。
+   * - 收起态向右过阈值 → 展开并**继续跟鼠标**改宽（不再松手重来、也不再弹回默认宽）；
+   * - 展开态拖到最小宽后再向左越过缓冲 → 收起，监听不撤，向右可再次拖出；
+   * - 拖拽中途收起后的再展开阈值 = MIN_WIDTH（> 收起阈值 MIN-32），留出死区防边缘抖动。
+   */
   function startDrag(e: ReactMouseEvent) {
     e.preventDefault();
     const ac = new AbortController();
     document.body.classList.add("side-resizing");
     const stop = () => { ac.abort(); document.body.classList.remove("side-resizing"); };
+    let isCollapsed = collapsed;
+    let expandAt = isCollapsed ? RAIL_EXPAND_PX : MIN_WIDTH;
     window.addEventListener("mousemove", ev => {
-      // 已在最低阈值还继续向左收缩（越过缓冲）→ 与点“收起侧边栏”同样效果
-      if (ev.clientX < MIN_WIDTH - COLLAPSE_SLACK) { stop(); onToggleCollapsed(true); return; }
-      setWidth(clampWidth(ev.clientX));
-    }, { signal: ac.signal });
-    window.addEventListener("mouseup", stop, { signal: ac.signal });
-  }
-
-  /** 收起态拖宽把手：图标条右缘向右拖出阈值 → 与点“展开侧边栏”同样效果（宽度回默认）。 */
-  function startExpandDrag(e: ReactMouseEvent) {
-    e.preventDefault();
-    const ac = new AbortController();
-    document.body.classList.add("side-resizing");
-    const stop = () => { ac.abort(); document.body.classList.remove("side-resizing"); };
-    window.addEventListener("mousemove", ev => {
-      if (ev.clientX > RAIL_EXPAND_PX) { stop(); onToggleCollapsed(false); }
+      const x = ev.clientX;
+      if (isCollapsed) {
+        if (x > expandAt) {
+          isCollapsed = false;
+          onToggleCollapsed(false);
+          setWidth(clampWidth(x)); // 展开瞬间起宽跟手：x<MIN 时钳在 192，到 MIN 即自然衔接
+        }
+        return;
+      }
+      if (x < MIN_WIDTH - COLLAPSE_SLACK) {
+        isCollapsed = true;
+        expandAt = MIN_WIDTH;
+        onToggleCollapsed(true);
+        return;
+      }
+      setWidth(clampWidth(x));
     }, { signal: ac.signal });
     window.addEventListener("mouseup", stop, { signal: ac.signal });
   }
@@ -613,10 +622,10 @@ export default function Sidebar(props: Props) {
         </button>
       </div>
 
-      {/* 收起态也能拖边拉回（参考 ChatGPT）：右缘把手，向右拖出阈值即展开 */}
+      {/* 收起态也能拖边拉回：右缘把手，向右拖出阈值即展开并继续跟手变宽（一次拖拽不中断） */}
       {!narrow && (
         <div className="side-resizer" role="separator" aria-orientation="vertical"
-          data-tip="向右拖动展开侧边栏" onMouseDown={startExpandDrag} />
+          data-tip="向右拖动展开侧边栏" onMouseDown={startDrag} />
       )}
 
       {recentOpen && (
@@ -726,7 +735,7 @@ export default function Sidebar(props: Props) {
 
     {/* 拖宽把手（窄屏禁用） */}
     {!narrow && (
-      <div className="side-resizer" role="separator" aria-orientation="vertical" data-tip="拖动调整侧边栏宽度；拖到最窄后继续向左可收起" onMouseDown={startDrag} />
+      <div className="side-resizer" role="separator" aria-orientation="vertical" data-tip="拖动调整侧边栏宽度；拖到最窄后继续向左可收起，无需松手再向右拖即可拖回" onMouseDown={startDrag} />
     )}
 
     {/* 会话“⋯”菜单：fixed 定位，可越出侧边栏，不再被裁切 */}
