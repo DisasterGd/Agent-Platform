@@ -22,7 +22,7 @@ interface Draft {
 
 const ROLE_META: { key: RoleKey; title: string; desc: string; optionKey: "models" | "vision_models" | "image_models"; allowNone: boolean }[] = [
   { key: "reasoning", title: "主模型（推理）", desc: "对话、任务规划与执行、工具循环、记忆提炼——纯文本任务只用它", optionKey: "models", allowNone: false },
-  { key: "vision", title: "识图（视觉）", desc: "把对话里附件的图片描述成文字，让主模型“看见”图片内容", optionKey: "vision_models", allowNone: true },
+  { key: "vision", title: "识图（视觉）", desc: "把附件图片描述成文字供主模型理解；不配置时，原生支持图像的主模型会直接收图", optionKey: "vision_models", allowNone: true },
   { key: "image_gen", title: "图像生成", desc: "generate_image 工具所用：插画/海报/头像等，产物自动进资料库", optionKey: "image_models", allowNone: true },
 ];
 
