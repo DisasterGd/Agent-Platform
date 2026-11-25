@@ -111,6 +111,10 @@ class KnowledgeChunk(Base):
     chunk_index: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     content: Mapped[str] = mapped_column(Text)
     char_len: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # v0.6.2 向量检索：embedding 为 JSON 数值数组（MySQL JSON / SQLite TEXT 均可），embedding_model 记产生它的模型。
+    # 两者必须成对看：角色换模型后旧向量不再可比（维度/空间都不同），按“未嵌入”对待、重建时重算。
+    embedding_model: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 class ConversationGroup(Base):

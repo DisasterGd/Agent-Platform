@@ -7,7 +7,8 @@
      "roles": {
         "reasoning": {"provider": "...", "model": "..."},      # 主模型：对话/任务/工具循环/记忆提炼
         "vision":    {"provider": "...", "model": "..."} | null,  # 识图：附件图片描述
-        "image_gen": {"provider": "...", "model": "..."} | null   # 生图：generate_image 工具
+        "image_gen": {"provider": "...", "model": "..."} | null,   # 生图：generate_image 工具
+        "embedding": {"provider": "...", "model": "..."} | null    # 嵌入：知识库向量检索（null=关闭，纯关键词）
      },
      "memory_enabled": true}
 
@@ -18,7 +19,7 @@
 - **API Key 经 DPAPI 加密落盘**（infrastructure/secret_store），HTTP 层只回 has_api_key 布尔、永不回显明文；
 - api_key 保存语义：None=保留原值，""=清除，非空=替换；roles 里出现哪个键就整体替换哪个角色（null=取消配置）；
 - v1（单配置）/v2（profiles 无 roles）旧文件在读取时自动派生 roles：reasoning 取当时的 active+model，
-  vision 取 vision_model（空则 null），image_gen=null——行为与旧版本完全一致；下一次保存写成 v3。
+  vision 取 vision_model（空则 null），image_gen/embedding=null——行为与旧版本完全一致；下一次保存写成 v3。
 前端设置页通过 /api/settings 读写这里的配置。
 """
 from __future__ import annotations
@@ -31,7 +32,7 @@ from agent_platform.config import settings
 from agent_platform.infrastructure import secret_store
 
 # 内置国产模型预设（前端设置页展示 + 下拉候选）
-# models/vision_models/image_models 分别是三个角色的下拉候选；model 是 reasoning 的默认模型名。
+# models/vision_models/image_models/embedding_models 分别是四个角色的下拉候选；model 是 reasoning 的默认模型名。
 # 约束（v0.6.1，问题清单 #2）：**vision_models ⊆ models**——视觉模型都能对话/推理，主模型下拉必须看得到它们；
 # image_models 走独立 images 端点，不是聊天模型，允许不在 models 里。
 # 清单按 2026-11 各家官方文档核对（DeepSeek 价格页 / 阿里云百炼模型列表 / 智谱模型概览），
@@ -46,6 +47,8 @@ PRESETS = {
         # deepseek-flash（V4.1-Flash）原生支持图像输入；deepseek-v4-pro 为纯文本；官方无生图模型
         "vision_models": ["deepseek-flash"],
         "image_models": [],
+        # DeepSeek 官方没有嵌入端点，知识库向量检索需另配一家的 embedding 角色
+        "embedding_models": [],
         "api_url": "https://platform.deepseek.com/",
     },
     "qwen": {
@@ -56,7 +59,12 @@ PRESETS = {
         "models": ["qwen3.8-flash", "qwen3.7-plus", "qwen4-max", "qwen3.8-omni-flash"],
         # qwen4-max / qwen3.7-plus 原生支持图像输入；qwen3.8-omni-flash 为独立多模态（图/视频/音）
         "vision_models": ["qwen3.8-omni-flash", "qwen3.7-plus", "qwen4-max"],
+        # 2026-11 实测（qwen 真实 Key，走适配后的 DashScope 原生 multimodal-generation 同步端点）：
+        # 三个模型全部真实出图——qwen-image-2.0-pro 18.6s / qwen-image-3.0-pro 62.9s（慢但可用）/ wan2.7-image-pro 27.4s；
+        # 注：各家兼容模式 /images/generations 对这批 id 一律 404，imagegen 已按域名改走原生端点
         "image_models": ["qwen-image-2.0-pro", "qwen-image-3.0-pro", "wan2.7-image-pro"],
+        # DashScope 兼容模式 /embeddings：v4 支持多语言/任务指令（默认 1024 维），v3 为其前代
+        "embedding_models": ["text-embedding-v4", "text-embedding-v3"],
         "api_url": "https://bailian.console.aliyun.com/",
     },
     "zhipu": {
@@ -67,7 +75,10 @@ PRESETS = {
         "models": ["glm-5.3", "glm-5.2", "glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7-flash",
                    "glm-5.3-flash", "glm-5v-turbo", "glm-4.6v"],
         "vision_models": ["glm-5.3-flash", "glm-5v-turbo", "glm-4.6v"],
+        # 2026-11 实测：本机无智谱 Key，glm-image 未能真实调用（端点是否兼容 OpenAI 格式未知）；
+        # 拿到 Key 后需实测再决定是否保留此候选
         "image_models": ["glm-image"],
+        "embedding_models": ["embedding-3"],
         "api_url": "https://open.bigmodel.cn/",
     },
     "custom": {
@@ -78,13 +89,15 @@ PRESETS = {
         "models": [],
         "vision_models": [],
         "image_models": [],
+        "embedding_models": [],
         "api_url": "",
     },
 }
 
-ROLES = ("reasoning", "vision", "image_gen")
+ROLES = ("reasoning", "vision", "image_gen", "embedding")
 #: 角色下拉候选取自预设的哪个键
-ROLE_OPTION_KEY = {"reasoning": "models", "vision": "vision_models", "image_gen": "image_models"}
+ROLE_OPTION_KEY = {"reasoning": "models", "vision": "vision_models",
+                   "image_gen": "image_models", "embedding": "embedding_models"}
 PROFILE_FIELDS = ("base_url", "api_key", "model", "vision_model")
 
 
@@ -159,6 +172,7 @@ class SettingsService:
             "reasoning": {"provider": active, "model": profile["model"]},
             "vision": {"provider": active, "model": vision} if vision else None,
             "image_gen": None,
+            "embedding": None,  # v0.6.2 新增角色：旧配置派生时保持关闭，行为不变
         }
 
     def _data(self) -> dict:
