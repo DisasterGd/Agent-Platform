@@ -25,6 +25,7 @@ from agent_platform.repositories.conversations import ConversationRepository
 from agent_platform.repositories.messages import MessageRepository
 from agent_platform.repositories.tasks import TaskRepository
 from agent_platform.services.chat_service import ChatService
+from agent_platform.services.knowledge_service import KnowledgeService
 from agent_platform.tools.builtin.registry import build_default_registry
 
 SUMMARY_SYSTEM_PROMPT = "你负责任务收尾：结合目标与各步骤结果，输出一段简洁完整的中文最终答复，不要提及内部步骤结构。"
@@ -129,7 +130,13 @@ class TaskService:
 
         # v0.4：任务执行器同样注入全局/项目记忆
         memory_block = MemoryManager(self.db, self.model).memory_block(task.user_id, task.project_id)
-        runner = Runner(self.model, tools=self.tools)
+        # v0.6.1：本轮任务工具表注入 search_knowledge（携带任务归属/项目，工具层不碰库）
+        knowledge = KnowledgeService(self.db)
+
+        def knowledge_search(query: str, project_only: bool) -> list[dict]:
+            return knowledge.tool_search(task.user_id, task.project_id, query, project_only)
+
+        runner = Runner(self.model, tools=build_default_registry(knowledge_search=knowledge_search))
         try:
             async for event in runner.run(task.goal, steps, memory_block):
                 # 取消检查：任何时刻把状态改为 cancelled 都会在下一个事件生效

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from agent_platform.infrastructure.filetypes import content_type_for
 from agent_platform.infrastructure.storage.local import get_storage
+from agent_platform.services.knowledge_service import KnowledgeService
 from agent_platform.services.library_service import LibraryService
 from apps.api.dependencies import get_current_user_id, get_db
 
@@ -39,6 +40,8 @@ async def upload_file(
     )
     # 登记资料库：上传此刻还不知道会进哪个会话，归属在发送消息时补写
     asset = LibraryService(db).register_saved(stored, user_id=user_id, source="upload")
+    # v0.6.1 知识库：上传即尝试切块（图片/二进制自然跳过；异常只吞断，绝不阻断上传）
+    KnowledgeService(db).auto_index(int(asset["id"]))
     return {**stored.to_dict(), "asset_id": asset["id"], "kind_label": asset["kind_label"]}
 
 

@@ -27,7 +27,9 @@ from agent_platform.repositories.conversations import ConversationRepository
 from agent_platform.repositories.groups import GroupRepository
 from agent_platform.repositories.messages import MessageRepository
 from agent_platform.repositories.projects import ProjectRepository
+from agent_platform.services.knowledge_service import KnowledgeService
 from agent_platform.services.library_service import LibraryService
+from agent_platform.services.settings_service import PRESETS, get_settings_service
 from agent_platform.tools.builtin.registry import build_default_registry
 from agent_platform.tools.registry import ToolRegistry
 
@@ -64,6 +66,22 @@ class ChatService:
         self.memory = MemoryManager(db, self.model)
         # v0.5：生成文件登记进资料库（工具只产出 artifact 事件，落库在这里）
         self.library = LibraryService(db)
+        # v0.6.1：知识库检索（工具按轮注入，闭包携带当轮归属）
+        self.knowledge = KnowledgeService(db)
+        # v0.6 打磨：未配置识图角色、但主模型原生支持图像（在其供应商 vision_models 清单内）
+        # → 附件图片以 data URI 直传主模型，而不是悄悄丢弃
+        self.images_to_main = self._compute_direct_vision()
+
+    def _compute_direct_vision(self) -> bool:
+        if self.model is None:
+            return False
+        service = get_settings_service()
+        if service.resolve_role("vision") is not None:
+            return False
+        reasoning = service.resolve_role("reasoning")
+        if not reasoning:
+            return False
+        return reasoning["model"] in (PRESETS.get(reasoning["provider"], {}).get("vision_models") or [])
 
     def create_conversation(
         self, user_id: int, title: str = "新会话", project_id: int | None = None
@@ -166,7 +184,7 @@ class ChatService:
                 variant_index=self.messages.next_variant_index(group),
             )
 
-        enriched = await self._enrich(content, attachments)
+        enriched, direct_images = await self._enrich(content, attachments)
         self.conversations.touch(conversation_id)
 
         # 上下文 = 此前各轮 + 本轮提问（合成一条未落库的最新 id 以免被摘要覆盖）；
@@ -175,6 +193,7 @@ class ChatService:
         next_id = max((m.id for m in active), default=0) + 1
         entries = prior + [(next_id, "user", enriched)]
         context, ctx_events = await self.memory.build_messages(conversation, entries)
+        self._attach_direct_images(context, direct_images)
         for event in ctx_events:
             yield event
         async for event in self._stream_turn(
@@ -228,9 +247,13 @@ class ChatService:
         except Exception:  # noqa: BLE001 — 识图失败不影响主流程
             return None
 
-    async def _enrich(self, content: str, attachments: list[dict]) -> str:
-        """把附件正文/识图结果拼进用户消息，供模型读取。"""
+    async def _enrich(self, content: str, attachments: list[dict]) -> tuple[str, list[ImagePart]]:
+        """把附件正文/识图结果拼进用户消息，供模型读取。
+
+        返回 (增强正文, 直传主模型的图片)——后者仅在“未配置识图角色且主模型原生支持图像”时有内容。
+        """
         parts: list[str] = [content]
+        direct_images: list[ImagePart] = []
         for att in attachments:
             parsed = parse_file_url(att.get("url", ""))
             if parsed is None:
@@ -242,11 +265,35 @@ class ChatService:
                 description = await self._describe_image(category, stored_name, content_type)
                 if description:
                     parts.append(f"\n\n[图片 {name}]\n{description}")
+                elif self.images_to_main:
+                    data_uri = image_to_data_uri(category, stored_name, content_type)
+                    if data_uri:
+                        direct_images.append(ImagePart(url=data_uri))
+                        parts.append(f"\n\n[图片 {name}]\n（原图已附在本消息中，请直接观察）")
+                else:
+                    parts.append(f"\n\n[图片 {name}]\n（未解析：未配置识图角色，且主模型不支持图像输入）")
             else:
                 text = extract_text(category, stored_name, content_type)
                 if text:
                     parts.append(f"\n\n[附件 {name}]\n{text}")
-        return "\n".join(parts)
+        return "\n".join(parts), direct_images
+
+    def _turn_tools(self, conversation: Conversation) -> ToolRegistry:
+        """当轮工具表：注入 search_knowledge——闭包携带会话归属/项目，工具层因此保持“不碰数据库”。"""
+        def search(query: str, project_only: bool) -> list[dict]:
+            return self.knowledge.tool_search(conversation.user_id, conversation.project_id, query, project_only)
+
+        return build_default_registry(knowledge_search=search)
+
+    @staticmethod
+    def _attach_direct_images(context: list[ChatMessage], images: list[ImagePart]) -> None:
+        """直传图挂到最后一条用户消息上（压缩摘要等结构不动，只补 images 字段）。"""
+        if not images:
+            return
+        for msg in reversed(context):
+            if msg.role == "user":
+                msg.images = list(images)
+                return
 
     def _register_asset(self, conversation: Conversation, artifact: dict) -> None:
         """v0.5：把工具产出的文件登记进资料库（带会话/项目归属）。
@@ -291,7 +338,7 @@ class ChatService:
         yield task_started()
 
         attachments = attachments or []
-        enriched = await self._enrich(content, attachments)
+        enriched, direct_images = await self._enrich(content, attachments)
 
         # 落库保存原始内容 + 附件元数据，供前端展示与刷新后回显
         self.messages.add(conversation_id, "user", content, attachments=attachments)
@@ -306,6 +353,7 @@ class ChatService:
         if entries and entries[-1][1] == "user":
             entries[-1] = (entries[-1][0], "user", enriched)
         context, ctx_events = await self.memory.build_messages(conversation, entries)
+        self._attach_direct_images(context, direct_images)
         for event in ctx_events:
             yield event
 
@@ -350,7 +398,7 @@ class ChatService:
 
         try:
             if self.model is not None:
-                agent = Agent(self.model, tools=self.tools)
+                agent = Agent(self.model, tools=self._turn_tools(conversation))
                 async for event in agent.stream(chat_messages):
                     if event.type == "text_delta":
                         parts.append(event.data.get("content", ""))

@@ -1,6 +1,8 @@
 """构建默认工具注册表。"""
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from agent_platform.tools.builtin.archive import (
     CREATE_ZIP_DESCRIPTION,
     CREATE_ZIP_PARAMETERS,
@@ -21,6 +23,11 @@ from agent_platform.tools.builtin.images import (
     GENERATE_IMAGE_PARAMETERS,
     generate_image_tool,
 )
+from agent_platform.tools.builtin.knowledge_search import (
+    SEARCH_KNOWLEDGE_DESCRIPTION,
+    SEARCH_KNOWLEDGE_PARAMETERS,
+    build_search_knowledge,
+)
 from agent_platform.tools.builtin.search import (
     WEB_SEARCH_DESCRIPTION,
     WEB_SEARCH_PARAMETERS,
@@ -34,7 +41,9 @@ from agent_platform.tools.builtin.textfile import (
 from agent_platform.tools.registry import ToolRegistry
 
 
-def build_default_registry() -> ToolRegistry:
+def build_default_registry(
+    knowledge_search: Callable[[str, bool], list[dict]] | None = None,
+) -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(
         "web_search", WEB_SEARCH_DESCRIPTION, WEB_SEARCH_PARAMETERS, web_search
@@ -56,4 +65,10 @@ def build_default_registry() -> ToolRegistry:
     registry.register(
         "generate_image", GENERATE_IMAGE_DESCRIPTION, GENERATE_IMAGE_PARAMETERS, generate_image_tool
     )
+    # v0.6.1：知识库检索（闭包携带 user/project 上下文，由 Chat/Task 服务按当轮注入）
+    if knowledge_search is not None:
+        registry.register(
+            "search_knowledge", SEARCH_KNOWLEDGE_DESCRIPTION, SEARCH_KNOWLEDGE_PARAMETERS,
+            build_search_knowledge(knowledge_search),
+        )
     return registry
