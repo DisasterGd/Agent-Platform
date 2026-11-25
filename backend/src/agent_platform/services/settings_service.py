@@ -32,6 +32,8 @@ from agent_platform.infrastructure import secret_store
 
 # 内置国产模型预设（前端设置页展示 + 下拉候选）
 # models/vision_models/image_models 分别是三个角色的下拉候选；model 是 reasoning 的默认模型名。
+# 约束（v0.6.1，问题清单 #2）：**vision_models ⊆ models**——视觉模型都能对话/推理，主模型下拉必须看得到它们；
+# image_models 走独立 images 端点，不是聊天模型，允许不在 models 里。
 # 清单按 2026-11 各家官方文档核对（DeepSeek 价格页 / 阿里云百炼模型列表 / 智谱模型概览），
 # 另含一次百炼 /models 实时目录实测；厂商随时调整，设置页“获取可用模型”可拉取 Key 下实时列表兜底。
 PRESETS = {
@@ -51,7 +53,7 @@ PRESETS = {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "model": "qwen3.7-plus",
         "vision_model": "",
-        "models": ["qwen3.8-flash", "qwen3.7-plus", "qwen4-max"],
+        "models": ["qwen3.8-flash", "qwen3.7-plus", "qwen4-max", "qwen3.8-omni-flash"],
         # qwen4-max / qwen3.7-plus 原生支持图像输入；qwen3.8-omni-flash 为独立多模态（图/视频/音）
         "vision_models": ["qwen3.8-omni-flash", "qwen3.7-plus", "qwen4-max"],
         "image_models": ["qwen-image-2.0-pro", "qwen-image-3.0-pro", "wan2.7-image-pro"],
@@ -62,7 +64,8 @@ PRESETS = {
         "base_url": "https://open.bigmodel.cn/api/paas/v4",
         "model": "glm-5-turbo",
         "vision_model": "",
-        "models": ["glm-5.3", "glm-5.2", "glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7-flash"],
+        "models": ["glm-5.3", "glm-5.2", "glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7-flash",
+                   "glm-5.3-flash", "glm-5v-turbo", "glm-4.6v"],
         "vision_models": ["glm-5.3-flash", "glm-5v-turbo", "glm-4.6v"],
         "image_models": ["glm-image"],
         "api_url": "https://open.bigmodel.cn/",

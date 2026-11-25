@@ -51,6 +51,9 @@ const MIN_WIDTH = 192;
 const MAX_RATIO = 0.32;
 /** 拖拽越界收起缓冲：宽度到下限后再向左超过该像素数，视为“继续收缩”→ 收起侧边栏。 */
 const COLLAPSE_SLACK = 32;
+/** 收起态图标条宽度（与 styles.css .sidebar.rail 一致）与“向右拖回”的触发阈值（参考 ChatGPT）。 */
+const RAIL_WIDTH = 64;
+const RAIL_EXPAND_PX = RAIL_WIDTH + 40;
 
 function loadCollapsed(): Set<string> {
   try {
@@ -208,6 +211,18 @@ export default function Sidebar(props: Props) {
       // 已在最低阈值还继续向左收缩（越过缓冲）→ 与点“收起侧边栏”同样效果
       if (ev.clientX < MIN_WIDTH - COLLAPSE_SLACK) { stop(); onToggleCollapsed(true); return; }
       setWidth(clampWidth(ev.clientX));
+    }, { signal: ac.signal });
+    window.addEventListener("mouseup", stop, { signal: ac.signal });
+  }
+
+  /** 收起态拖宽把手：图标条右缘向右拖出阈值 → 与点“展开侧边栏”同样效果（宽度回默认）。 */
+  function startExpandDrag(e: ReactMouseEvent) {
+    e.preventDefault();
+    const ac = new AbortController();
+    document.body.classList.add("side-resizing");
+    const stop = () => { ac.abort(); document.body.classList.remove("side-resizing"); };
+    window.addEventListener("mousemove", ev => {
+      if (ev.clientX > RAIL_EXPAND_PX) { stop(); onToggleCollapsed(false); }
     }, { signal: ac.signal });
     window.addEventListener("mouseup", stop, { signal: ac.signal });
   }
@@ -597,6 +612,12 @@ export default function Sidebar(props: Props) {
           <CollapseIcon flip />
         </button>
       </div>
+
+      {/* 收起态也能拖边拉回（参考 ChatGPT）：右缘把手，向右拖出阈值即展开 */}
+      {!narrow && (
+        <div className="side-resizer" role="separator" aria-orientation="vertical"
+          data-tip="向右拖动展开侧边栏" onMouseDown={startExpandDrag} />
+      )}
 
       {recentOpen && (
         <>
