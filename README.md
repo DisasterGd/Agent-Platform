@@ -210,6 +210,11 @@
   智谱补入 `glm-5.3-flash`/`glm-5v-turbo`/`glm-4.6v`，千问补入 `qwen3.8-omni-flash`；新增断言用例守住“vision ⊆ models”这条线
 - **知识库/搜索等路由**：`GET /api/knowledge/search`、`POST /api/knowledge/reindex`（替换 v0.5 的占位接口）
 
+**v0.6.3（v0.7/v0.8 设计方案讨论稿 · 多用户就绪度审计）**
+
+- 新增 `docs/design-v0.7-v0.8.md`：账号体系与云端部署完整方案——现状审计（归属字段已就绪/约 10 端点缺归属校验/settings 全局单例等 8 项缺口）、`AUTH_MODE=local|cloud` 双模式、邮箱验证码无密码登录（MailProvider 抽象，SMTP 授权码零成本起步）、文件 per-user 目录存储（文件不进数据库，`file_assets` 仍只做索引）、settings 上云与 secret_store Fernet 补债、BYOK 用户自带 Key、admin 最小集（三端点不做 RBAC）、部署选项对比（家机 + Cloudflare Tunnel 零成本先行）与运维清单、里程碑 0.7.1–0.8.2 切分
+- 本轮纯文档与版本号，无代码改动；v0.7 实施以方案定稿为准
+
 **v0.6.2（向量检索升级 · 生图端点实测适配 · UI 细节与动感层）**
 
 - **知识库 hybrid 语义检索**：新增第 4 个可选角色 **嵌入（embedding）**——配置后上传资料切块同步嵌入向量
