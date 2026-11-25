@@ -20,7 +20,7 @@ from apps.api.routes import memories as memories_route
 from apps.api.routes import projects as projects_route
 from apps.api.routes import settings as settings_route
 
-app = FastAPI(title=settings.app_name, version="0.6.1")
+app = FastAPI(title=settings.app_name, version="0.6.2")
 
 app.add_middleware(
     CORSMiddleware,
