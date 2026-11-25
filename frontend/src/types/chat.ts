@@ -209,3 +209,24 @@ export interface SearchResults {
   projects: Project[];
   groups: ConvGroup[];
 }
+
+/** v0.6.1 知识库检索命中：asset 与资料库列表同形状，可直接复用预览链路。 */
+export interface KnowledgeHit {
+  asset: FileAsset;
+  chunk_index: number;
+  snippet: string;
+  score: number;
+}
+
+export interface KnowledgeSearchResult {
+  query: string;
+  terms: string[];
+  items: KnowledgeHit[];
+}
+
+export interface KnowledgeReindexResult {
+  scanned: number;
+  indexed_assets: number;
+  new_chunks: number;
+  total_chunks: number;
+}

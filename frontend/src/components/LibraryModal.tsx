@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { knowledgeApi } from "../services/knowledge";
 import { libraryApi, type AssetFilters } from "../services/library";
 import Markdown from "./Markdown";
-import type { AssetKind, AssetPreview, FileAsset, Project } from "../types/chat";
+import type { AssetKind, AssetPreview, FileAsset, KnowledgeHit, Project } from "../types/chat";
 
 interface Props {
   projects: Project[];
@@ -58,6 +59,13 @@ export default function LibraryModal(props: Props) {
   const [projectId, setProjectId] = useState<number | "none" | undefined>(undefined);
   const [grouped, setGrouped] = useState(false);
   const [keyword, setKeyword] = useState("");
+  // v0.6.1 内容检索：在“上传资料的切块”里搜正文（与按文件名搜索互斥）
+  const [searchMode, setSearchMode] = useState<"name" | "content">("name");
+  const [hits, setHits] = useState<KnowledgeHit[] | null>(null);
+  const [hitsLoading, setHitsLoading] = useState(false);
+  const [reindexing, setReindexing] = useState(false);
+  const [reindexNote, setReindexNote] = useState("");
+  const [kbTick, setKbTick] = useState(0);
 
   const [items, setItems] = useState<FileAsset[]>([]);
   const [kindCounts, setKindCounts] = useState<Record<string, number>>({});
@@ -117,9 +125,48 @@ export default function LibraryModal(props: Props) {
   // 筛选/搜索变化：防抖 250ms 再请求（首帧由上面的挂载效应负责）
   useEffect(() => {
     if (!mounted.current) { mounted.current = true; return; }
+    if (searchMode === "content") return;  // 内容模式走下面的知识库检索，不重拉列表
     const timer = window.setTimeout(() => void load(), 250);
     return () => window.clearTimeout(timer);
-  }, [load]);
+  }, [load, searchMode]);
+
+  // v0.6.1 内容检索：防抖 300ms 查知识库切块；项目筛选仅在“具体项目”时生效（未归类无法按项目限定）
+  useEffect(() => {
+    if (searchMode !== "content") return;
+    const q = keyword.trim();
+    if (!q) { setHits([]); return; }
+    const timer = window.setTimeout(() => {
+      setHitsLoading(true);
+      knowledgeApi.search(q, {
+        projectId: typeof projectId === "number" ? projectId : undefined,
+        limit: 24,
+      })
+        .then(r => setHits(r.items))
+        .catch((e: unknown) => { setHits([]); setError(e instanceof Error ? e.message : "内容检索失败"); })
+        .finally(() => setHitsLoading(false));
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchMode, keyword, projectId, kbTick]);
+
+  async function runReindex() {
+    setReindexing(true);
+    setReindexNote("");
+    try {
+      const r = await knowledgeApi.reindex();
+      setReindexNote(`本次补索引 ${r.indexed_assets} 个文件 · ${r.new_chunks} 块；库内共 ${r.total_chunks} 块`);
+      setKbTick(t => t + 1);  // 让正在进行的关键词检索重跑一次，新块马上能搜到
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "重建索引失败");
+    } finally {
+      setReindexing(false);
+    }
+  }
+
+  function switchMode(next: "name" | "content") {
+    if (next === searchMode) return;
+    setSearchMode(next);
+    setHits(next === "content" ? [] : null);
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -318,10 +365,18 @@ export default function LibraryModal(props: Props) {
         </div>
 
         <div className="lib-toolbar">
-          <input className="search-input lib-search" placeholder="按文件名搜索…"
+          <div className="lib-seg">
+            <button type="button" className={`lib-seg-btn ${searchMode === "name" ? "on" : ""}`}
+              onClick={() => switchMode("name")}>文件名</button>
+            <button type="button" className={`lib-seg-btn ${searchMode === "content" ? "on" : ""}`}
+              data-tip="在已上传文件的正文切块里全文检索（Agent 在对话中也能调用）"
+              onClick={() => switchMode("content")}>内容</button>
+          </div>
+          <input className="search-input lib-search"
+            placeholder={searchMode === "content" ? "搜索文件正文（知识库切块）…" : "按文件名搜索…"}
             value={keyword}
             onChange={e => setKeyword(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void load(); } }} />
+            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); if (searchMode === "name") void load(); } }} />
           <div className="lib-seg">
             {([["", "全部来源"], ["upload", "我上传的"], ["generated", "Agent 生成"]] as const).map(([key, label]) => (
               <button key={key || "all"} type="button" className={`lib-seg-btn ${source === key ? "on" : ""}`}
@@ -334,6 +389,11 @@ export default function LibraryModal(props: Props) {
             <button type="button" className={`lib-seg-btn ${grouped ? "on" : ""}`} onClick={() => setGrouped(true)}
               data-tip="按项目分组（文件夹视图）">按项目</button>
           </div>
+          <button type="button" className="lib-reindex" onClick={() => void runReindex()} disabled={reindexing}
+            data-tip="给还没建过内容索引的上传文件补建切块（已索引的不重复）">
+            {reindexing ? "索引中…" : "内容索引"}
+          </button>
+          {reindexNote && <em className="lib-reindex-note">{reindexNote}</em>}
         </div>
 
         {projects.length > 0 && (
@@ -354,7 +414,27 @@ export default function LibraryModal(props: Props) {
         {error && <div className="error lib-error">{error}</div>}
 
         <div className="modal-body lib-body">
-          {loading && items.length === 0
+          {searchMode === "content" ? (
+            keyword.trim() === ""
+              ? <div className="s-empty">输入关键词，在<b>用户上传资料</b>的正文切块里检索；点击结果可直接预览来源文件。<br />
+                  没索引过的文件先点上方“内容索引”补建。</div>
+              : hitsLoading
+                ? <div className="s-empty">正在检索内容索引…</div>
+                : !hits || hits.length === 0
+                  ? <div className="s-empty">知识库里没有匹配的内容。<br />
+                      换个关键词试试，或点“内容索引”给未索引的上传文件补建切块。</div>
+                  : (
+                    <div className="lib-kb-list">
+                      {hits.map(h => (
+                        <button key={`${h.asset.id}-${h.chunk_index}`} type="button" className="lib-kb-hit"
+                          data-tip="点击预览来源文件" onClick={() => void startPreview(h.asset)}>
+                          <span className="lib-kb-file">{h.asset.filename}<em>块 {h.chunk_index + 1}</em></span>
+                          <span className="lib-kb-snip">{h.snippet}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )
+          ) : loading && items.length === 0
             ? <div className="s-empty">正在读取资料库…</div>
             : items.length === 0
               ? <div className="s-empty">

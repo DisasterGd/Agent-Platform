@@ -359,6 +359,17 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline
 .role-chip.on{border-color:var(--signal);color:var(--signal);background:rgba(198,60,44,.06)}
 .role-dot{width:5px;height:5px;border-radius:50%;background:var(--signal)}
 .role-warn{font-size:11px;color:var(--signal-deep);line-height:1.6;margin-top:2px}
+/* ===== v0.6.1 资料库内容检索（知识库切块） ===== */
+.lib-reindex{flex:none;border:1px solid var(--line);border-radius:4px;background:transparent;color:var(--ink-soft);font-size:12px;padding:7px 12px}
+.lib-reindex:hover:not(:disabled){border-color:var(--signal);color:var(--signal)}
+.lib-reindex:disabled{opacity:.5;cursor:not-allowed}
+.lib-reindex-note{flex:1;min-width:0;font-style:normal;font-size:11px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lib-kb-list{display:flex;flex-direction:column;gap:8px;padding:4px 2px}
+.lib-kb-hit{display:flex;flex-direction:column;gap:5px;text-align:left;border:1px solid var(--line);border-radius:5px;background:var(--paper-raised);padding:11px 13px}
+.lib-kb-hit:hover{border-color:var(--line-strong)}
+.lib-kb-file{display:flex;align-items:baseline;gap:8px;font-size:12.5px;color:var(--ink)}
+.lib-kb-file em{font-style:normal;font-family:var(--mono);font-size:9.5px;color:var(--ink-faint);background:var(--paper-deep);border-radius:2px;padding:1px 6px}
+.lib-kb-snip{font-family:var(--mono);font-size:11.5px;line-height:1.7;color:var(--ink-soft);white-space:pre-line;word-break:break-word}
 
 /* 应用内确认弹窗（替代 window.confirm） */
 .confirm-modal{width:min(380px,100%)}
