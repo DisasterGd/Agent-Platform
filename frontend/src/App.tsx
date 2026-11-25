@@ -786,7 +786,7 @@ export default function App() {
     ? projects.find(p => p.id === listFilter.id)?.name ?? null
     : null;
 
-  return <div className="shell">
+  return <div className={generatingConvId ? "shell busy" : "shell"}>
     <Sidebar
       conversations={conversations} projects={projects} groups={groups}
       activeId={activeId} generatingConvId={generatingConvId} listFilter={listFilter}
@@ -826,7 +826,7 @@ export default function App() {
         </div>
         <div className="topbar-meta">
           <span className="meta-item" data-tip="当前生效的模型配置（设置页可改）">模型 <b>{modelNote}</b></span>
-          <span className="meta-item">v0.6.1</span>
+          <span className="meta-item">v0.6.2</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
