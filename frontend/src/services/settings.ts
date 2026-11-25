@@ -25,14 +25,15 @@ export interface Preset {
   model: string;
   vision_model: string;
   api_url: string;
-  /** 三个角色的下拉候选（输入框仍可手输任意名称） */
+  /** 四个角色的下拉候选（输入框仍可手输任意名称） */
   models?: string[];
   vision_models?: string[];
   image_models?: string[];
+  embedding_models?: string[];
 }
 
 /** v0.6 角色：谁干哪类活（引用某供应商档案的凭据）。model 可空，解析时用预设默认兜底。 */
-export type RoleKey = "reasoning" | "vision" | "image_gen";
+export type RoleKey = "reasoning" | "vision" | "image_gen" | "embedding";
 
 export interface RoleDraft {
   provider: string;

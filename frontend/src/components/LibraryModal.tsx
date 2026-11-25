@@ -153,7 +153,9 @@ export default function LibraryModal(props: Props) {
     setReindexNote("");
     try {
       const r = await knowledgeApi.reindex();
-      setReindexNote(`本次补索引 ${r.indexed_assets} 个文件 · ${r.new_chunks} 块；库内共 ${r.total_chunks} 块`);
+      // v0.6.2：嵌入角色开启时返回本次补嵌入的块数（0/缺省=纯切块，未开向量）
+      const emb = r.embedded_chunks ? ` · 补向量 ${r.embedded_chunks} 块` : "";
+      setReindexNote(`本次补索引 ${r.indexed_assets} 个文件 · ${r.new_chunks} 块${emb}；库内共 ${r.total_chunks} 块`);
       setKbTick(t => t + 1);  // 让正在进行的关键词检索重跑一次，新块马上能搜到
     } catch (e) {
       setError(e instanceof Error ? e.message : "重建索引失败");
@@ -428,7 +430,15 @@ export default function LibraryModal(props: Props) {
                       {hits.map(h => (
                         <button key={`${h.asset.id}-${h.chunk_index}`} type="button" className="lib-kb-hit"
                           data-tip="点击预览来源文件" onClick={() => void startPreview(h.asset)}>
-                          <span className="lib-kb-file">{h.asset.filename}<em>块 {h.chunk_index + 1}</em></span>
+                          <span className="lib-kb-file">{h.asset.filename}<em>块 {h.chunk_index + 1}</em>
+                            {h.semantic && (
+                              // 关键词分（score）恒显示；semantic 仅嵌入角色开启时出现——“换个说法也命中”的凭据
+                              <em className="lib-kb-sem"
+                                data-tip={`语义 cosine ${h.semantic.vector ?? "—"} · 融合分 ${h.semantic.final}`}>
+                                语义 {h.semantic.vector == null ? "—" : h.semantic.vector.toFixed(2)}
+                              </em>
+                            )}
+                          </span>
                           <span className="lib-kb-snip">{h.snippet}</span>
                         </button>
                       ))}

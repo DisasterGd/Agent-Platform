@@ -216,6 +216,8 @@ export interface KnowledgeHit {
   chunk_index: number;
   snippet: string;
   score: number;
+  /** v0.6.2 hybrid 混排：嵌入角色开启时为 {vector: cosine, final: 融合分}，关闭/降级时 null（向后兼容） */
+  semantic?: { vector: number | null; final: number } | null;
 }
 
 export interface KnowledgeSearchResult {
@@ -229,4 +231,6 @@ export interface KnowledgeReindexResult {
   indexed_assets: number;
   new_chunks: number;
   total_chunks: number;
+  /** v0.6.2：嵌入角色开启时本次补嵌入的块数（关闭时恒为 0） */
+  embedded_chunks?: number;
 }

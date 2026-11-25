@@ -20,10 +20,11 @@ interface Draft {
   api_key: string | null;
 }
 
-const ROLE_META: { key: RoleKey; title: string; desc: string; optionKey: "models" | "vision_models" | "image_models"; allowNone: boolean }[] = [
+const ROLE_META: { key: RoleKey; title: string; desc: string; optionKey: "models" | "vision_models" | "image_models" | "embedding_models"; allowNone: boolean }[] = [
   { key: "reasoning", title: "主模型（推理）", desc: "对话、任务规划与执行、工具循环、记忆提炼——纯文本任务只用它", optionKey: "models", allowNone: false },
   { key: "vision", title: "识图（视觉）", desc: "把附件图片描述成文字供主模型理解；不配置时，原生支持图像的主模型会直接收图", optionKey: "vision_models", allowNone: true },
   { key: "image_gen", title: "图像生成", desc: "generate_image 工具所用：插画/海报/头像等，产物自动进资料库", optionKey: "image_models", allowNone: true },
+  { key: "embedding", title: "向量检索（嵌入）", desc: "给知识库加语义检索：换个说法也能命中；不配置时检索退为纯关键词，索引与召回不受影响", optionKey: "embedding_models", allowNone: true },
 ];
 
 function draftFrom(provider: string, profiles: Record<string, ProfileView>, presets: Record<string, Preset>, config: ModelConfig | null): Draft {
@@ -44,6 +45,7 @@ function roleDrafts(roles: Partial<Record<RoleKey, { provider: string; model: st
     reasoning: roles?.reasoning ?? { provider: fallbackProvider, model: "" },
     vision: roles?.vision ?? null,
     image_gen: roles?.image_gen ?? null,
+    embedding: roles?.embedding ?? null,
   };
 }
 
@@ -188,8 +190,8 @@ export default function SettingsModal({ theme, onThemeChange, onClose }: Props) 
           <section className="set-section">
             <h3>模型角色</h3>
             <p className="set-note">
-              分工预配置：主模型负责推理与写码，识图/生图交给真正的多模态厂商——三个角色可以引用**不同供应商**的凭据，
-              组合出性价比方案（如推理 DeepSeek + 识图百炼）。纯文本任务只走主模型，不会动用其他角色。
+              分工预配置：主模型负责推理与写码，识图/生图交给真正的多模态厂商——四个角色可以引用<b>不同供应商</b>的凭据，
+              组合出性价比方案（如推理 DeepSeek + 识图百炼 + 嵌入百炼）。纯文本任务只走主模型，不会动用其他角色。
             </p>
             {ROLE_META.map(meta => (
               <RoleCard

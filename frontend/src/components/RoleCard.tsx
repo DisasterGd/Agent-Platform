@@ -6,7 +6,7 @@ interface Props {
   desc: string;
   /** null=该角色未启用（仅 allowNone 的角色可为 null） */
   value: RoleDraft | null;
-  optionKey: "models" | "vision_models" | "image_models";
+  optionKey: "models" | "vision_models" | "image_models" | "embedding_models";
   presets: Record<string, Preset>;
   profiles: Record<string, ProfileView>;
   discoveredBy: Record<string, string[]>;
@@ -38,11 +38,12 @@ export default function RoleCard({
     <div className="role-card">
       <div className="role-head">
         <b>{title}</b>
-        <span className="role-desc">{desc}</span>
         {!value ? <span className="role-badge off">未配置</span>
           : hasKey ? <span className="role-badge ok">就绪</span>
             : <span className="role-badge warn">缺 Key</span>}
       </div>
+      {/* 说明不再单行截断：整段换行呈现，全文直达（v0.6.2，悬停提示对长文无效） */}
+      <p className="role-desc">{desc}</p>
 
       {!value ? (
         <button type="button" className="role-enable"
@@ -69,10 +70,12 @@ export default function RoleCard({
             <span className="role-label">模型</span>
             <ModelSelect
               value={value.model} options={options} discovered={new Set(live)}
-              placeholder="下拉选择；留空则用该供应商的默认模型"
+              placeholder="下拉选择或输入模型名"
               onChange={v => onChange({ ...value, model: v })}
             />
           </div>
+          {/* 长占位符既难看又易被当成已填值（v0.6.2）：改短，留空语义挪到行下提示，且只在留空时出现 */}
+          {!value.model && <p className="role-hint">模型名留空 · 将使用该供应商的默认模型</p>}
           {allowNone && (
             <button type="button" className="role-disable" onClick={() => onChange(null)}>不使用该角色</button>
           )}
