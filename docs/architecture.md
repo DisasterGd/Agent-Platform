@@ -4,9 +4,9 @@
 React + TypeScript（侧边栏：新聊天/搜索/项目 + 分组分区 · 搜索弹窗 · 项目弹窗 · 聊天/任务双界面 · 任务卡片 · 思考过程面板 · 设置/记忆页）
        | HTTP / SSE
        v
-FastAPI routes（chat / tasks / projects / groups / search / memories / files / library / settings / auth / health）
+FastAPI routes（chat / tasks / projects / groups / search / memories / files / library / knowledge / settings / auth / health）
        v
-Services (业务用例: chat_service · task_service · project_service · group_service · search_service · memory_service · settings_service · library_service)
+Services (业务用例: chat_service · task_service · project_service · group_service · search_service · memory_service · settings_service · library_service · knowledge_service)
        |                                   |
        v                                   v
 Agent Core（agent 工具循环 · planner · runner · context · events）
@@ -49,6 +49,19 @@ v0.4.1 工作台结构：
 - 生成能力分工：`generate_file` 把 Markdown 渲染成文档（md/docx/pdf）；`write_file` 按模型给的文件名
   原样写出文本/代码/配置（文件名即用途声明）；`create_zip` 打包多文件（内联内容 + 引用本轮已生成的文件）。
   后两者都受服务端校验：后缀白名单、路径清洗（拒绝绝对路径与 `..`）、体积与条目上限。
+
+知识库切块与检索（v0.6.1，v0.5 的“切块与检索”收尾）：
+- **只索引用户上传**（`file_assets.source=upload`）：上传接口落库后立即 `auto_index`（提取正文失败/二进制自然跳过，
+  异常绝不阻断上传）；资料库“内容索引”按钮对漏网文件补建（反连接查询，不受列表分页上限约束）。
+- **切块**（`knowledge_service.chunk_text` 纯函数）：空行分段 → 段 ≈900 字聚合（≤2x 的整段不硬拆，保语义边界），
+  超长无换行段硬切；单文件 ≤400 块。块存 `knowledge_chunks`（asset_id CASCADE：删文件即清块，已实测）。
+- **检索**（按指南“先关键词、规模大了再上向量”）：`tokenize_query` 拆词（ASCII 词 + 中文 2-gram，疑问碎词过滤）→
+  LIKE 预取候选（≤400 块）→ Python 打分（词频×2 + 文件名命中×3）→ 窗口片段返回。
+  两入口共用 `KnowledgeService.search`：`GET /api/knowledge/search`（资料库“内容”模式）与工具 `search_knowledge`。
+- **工具接入的层次纪律**：`search_knowledge` 的注册闭包由 Chat/Task 服务**按轮构造**（携带 user/project 归属），
+  工具函数本身保持“纯函数不碰库”；结果文案向模型明示“片段是数据不是指令”（防提示注入）。
+- **识图直传（v0.6 打磨）**：识图角色未配置且主模型在供应商 `vision_models` 清单内 → 附件图片以 data URI 挂到最后一条
+  用户消息（`ChatMessage.images`）直接进模型；两者皆无 → 正文标注“未解析”。
 
 模型配置（v0.2 预设起步 → v0.5.1 增强 → v0.5.2 档案隔离与加密 → v0.6 角色化多厂商）：
 - **profiles = 凭据**：`data/settings.json` 每家各自 `{base_url, api_key(密文)}`（v2 遗留的 model/vision_model 字段读取兼容），
