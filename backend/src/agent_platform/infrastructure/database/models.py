@@ -92,6 +92,27 @@ class FileAsset(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
+class KnowledgeChunk(Base):
+    """v0.6.1（v0.5 收尾）知识库切块：资料库中文本类文件（上传的文档/代码）按段落切出的检索单元。
+
+    检索走关键词打分（指南“先关键词、规模大了再上向量”的最小可行形态）；
+    只索引 source=upload 的用户资料——Agent 生成的交付物不算“用户的知识”。
+    asset_id 外键 CASCADE：文件删除时切块一起清；project_id 冗余自档案，仅为建块时参考，
+    过滤一律走 FileAsset 联查（文件可在资料库里移项目，冗余列会过期）。
+    """
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (
+        Index("ix_knowledge_chunks_asset_index", "asset_id", "chunk_index"),
+        Index("ix_knowledge_chunks_user", "user_id"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("file_assets.id", ondelete="CASCADE"), index=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    content: Mapped[str] = mapped_column(Text)
+    char_len: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
 class ConversationGroup(Base):
     """v0.4.1 用户自定义分组：仅存自定义分组，默认分组（项目/任务/未分组）由代码归类。
 

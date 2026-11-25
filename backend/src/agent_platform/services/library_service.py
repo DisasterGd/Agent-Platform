@@ -282,6 +282,10 @@ class LibraryService:
                 continue
         return data.decode("utf-8", errors="replace")
 
+    def to_out(self, asset: Any) -> dict[str, Any]:
+        """单条档案的输出形状（知识库检索等外部场景复用，字段与列表一致）。"""
+        return self._to_out(asset)
+
     @staticmethod
     def _to_out(asset: Any, present: set[str] | None = None) -> dict[str, Any]:
         exists = True
