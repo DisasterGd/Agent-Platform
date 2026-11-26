@@ -18,11 +18,71 @@ from agent_platform.infrastructure.database.base import Base
 
 
 class User(Base):
+    """用户（v0.7 扩列）：email 是 cloud 模式的登录身份；local 模式仍只有 dev 行（email 为 NULL）。
+
+    无密码方案：没有 password 列，登录凭证是 auth_codes 验证码 + sessions 会话。
+    status: active / disabled（停用即时撤销全部 session，见 admin 路由）。
+    """
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
+    display_name: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    status: Mapped[str] = mapped_column(String(16), default="active", server_default="active")
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     conversations: Mapped[list["Conversation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+class UserSession(Base):
+    """v0.7 登录会话（服务端 session 表 + cookie，不用 JWT：可撤销、封号即时生效）。
+
+    cookie 里只放随机 token（secrets.token_urlsafe），库里存其 SHA-256——拖库不泄露可用令牌。
+    30 天滑动续期：resolve 时过期临近则顺延 expires_at。
+    """
+    __tablename__ = "sessions"
+    __table_args__ = (Index("ix_sessions_user", "user_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class AuthCode(Base):
+    """v0.7 登录/注册一次性验证码：库里只存 SHA-256 哈希，10 分钟有效，错 5 次作废。
+
+    注册登录合一：邮箱没注册过，验证通过即建号（验证码即凭证）。
+    行同时承担频控依据（按 email/IP 统计 created_at 窗口内的行数）。
+    """
+    __tablename__ = "auth_codes"
+    __table_args__ = (Index("ix_auth_codes_email_created", "email", "created_at"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    code_hash: Mapped[str] = mapped_column(String(64))
+    purpose: Mapped[str] = mapped_column(String(24), default="login", server_default="login")
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_ip: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class UserSetting(Base):
+    """v0.7 个人设置（cloud 模式）：等价 settings.json v3 的 JSON 一列，按 user 隔离。
+
+    local 模式不使用本表（仍走 settings.json 单例文件，行为零变化）。
+    结构与 settings_service 的 v3 布局完全一致（profiles+roles+memory_enabled），
+    API Key 仍经 secret_store 加密后存进 JSON，永不回显。
+    """
+    __tablename__ = "user_settings"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
 
 class Conversation(Base):
     __tablename__ = "conversations"
@@ -68,14 +128,16 @@ class FileAsset(Base):
     kind: 见 infrastructure/filetypes（code/document/image/archive/audio/video/other），
           资料库页签与筛选按它归类，落库避免每次重新猜。
     source: upload（聊天附件）/ chat（聊天中生成）/ task（任务步骤生成）/ library（存量扫描登记）
-    stored_name = 磁盘真实文件名；重命名只改 filename，因此历史消息里的旧下载链接一直有效。
+    stored_name = 磁盘真实文件名（v0.7 起落在 data/{category}/u{user_id}/ 下）；重命名只改 filename，
+    因此历史消息里的旧下载链接一直有效。
     conversation_id 不建外键：删除会话不应连带删除用户资料库里的文件。
     """
     __tablename__ = "file_assets"
     __table_args__ = (
         Index("ix_file_assets_user_created", "user_id", "created_at"),
         Index("ix_file_assets_project_created", "project_id", "created_at"),
-        UniqueConstraint("category", "stored_name", name="uq_file_assets_category_stored"),
+        # v0.7 per-user 目录：同一磁盘文件名在不同用户目录下互不冲突，唯一性随 user 走
+        UniqueConstraint("user_id", "category", "stored_name", name="uq_file_assets_user_category_stored"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)

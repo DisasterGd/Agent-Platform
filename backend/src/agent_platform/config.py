@@ -36,6 +36,28 @@ class Settings(BaseSettings):
     # 文件存储根目录（上传文件 + Agent 生成的文件），未来可替换为对象存储。
     storage_dir: str = str(_ROOT / "data")
 
+    # ---- v0.7 账号体系 ----
+    # auth_mode: local（默认）=单用户免登录，行为与 v0.6 完全一致；
+    #            cloud=邮箱验证码登录、按用户隔离数据/文件/设置——差异只在配置与认证，不在代码分叉。
+    auth_mode: str = "local"
+    # cloud 模式：首个管理员邮箱（该邮箱注册时自动 is_admin=1）；注册邀请码（空=开放注册，配了则注册必填）
+    admin_email: str = ""
+    invite_code: str = ""
+    # 登录会话有效期（天，滑动续期）；cookie 名固定为 ap_session
+    session_ttl_days: int = 30
+    # cloud 模式下加密用户 API Key 的服务密钥（Fernet 派生源；cloud 必配，local 不用——local 走 DPAPI）
+    service_secret: str = ""
+
+    # ---- 邮件（验证码通道，v0.7）----
+    # mail_provider: console（默认，验证码打印到控制台/日志，本地调试 cloud 模式用）| smtp
+    # smtp：QQ/163 邮箱授权码即可（smtp.qq.com:465 / smtp.163.com:465），零新依赖
+    mail_provider: str = "console"
+    smtp_host: str = ""
+    smtp_port: int = 465
+    smtp_user: str = ""
+    smtp_password: str = ""
+    mail_from: str = ""
+
     # 三级记忆（v0.4）
     # memory_enabled：总开关（上下文注入 + 对话后自动提炼）；用户也可在设置页关闭自动记忆
     memory_enabled: bool = True
