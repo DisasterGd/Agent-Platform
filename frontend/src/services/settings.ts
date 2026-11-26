@@ -68,8 +68,8 @@ export const settingsApi = {
       method: "PUT",
       body: JSON.stringify(payload),
     }),
-  /** 获取可用模型：字段留空由服务端回退到已存配置（DeepSeek/百炼/智谱等均支持 OpenAI 兼容 /models） */
-  discoverModels: (body: { base_url?: string; api_key?: string }) =>
+  /** 获取可用模型：Key 留空由服务端按 provider 精确回退到该供应商已存的 Key（DeepSeek/百炼/智谱等均支持 OpenAI 兼容 /models） */
+  discoverModels: (body: { base_url?: string; api_key?: string; provider?: string }) =>
     request<{ models: string[] }>("/api/settings/discover-models", {
       method: "POST",
       body: JSON.stringify(body),

@@ -94,3 +94,22 @@ def test_env_key_never_leaks_to_other_providers(tmp_path: Path) -> None:
     assert reasoning["model"] == "qwen3.7-plus"
     if env.llm_provider != "qwen":
         assert reasoning["api_key"] == ""
+
+
+def test_resolve_provider_credentials_scoped_per_provider(tmp_path: Path) -> None:
+    """v0.7.1「获取可用模型」按家精确回退：编辑哪一家就用哪一家已存的 Key，绝不串别家的。
+
+    修复的 bug：旧实现回退到激活档案——激活 DeepSeek 时点千问的"获取可用模型"，
+    会把 DeepSeek 的 Key 发给百炼，必 401（2026-11-26 用户实测报障）。
+    """
+    service = _service(tmp_path)
+    service.save({"provider": "deepseek", "api_key": "sk-ds"})
+    service.save({"provider": "qwen", "api_key": "sk-qw"})
+    # 激活档案是 qwen，但按 deepseek 取凭据必须拿到 DeepSeek 的——与 active 无关、只看 provider
+    base, key = service.resolve_provider_credentials("qwen")
+    assert "dashscope" in base and key == "sk-qw"
+    base2, key2 = service.resolve_provider_credentials("deepseek")
+    assert "deepseek" in base2 and key2 == "sk-ds"
+    # 未登记的家：preset 的 base_url + 空 Key（discover 据此报"API Key 为空"，而不是拿别家的 Key 顶上）
+    base3, key3 = service.resolve_provider_credentials("zhipu")
+    assert "bigmodel" in base3 and key3 == ""

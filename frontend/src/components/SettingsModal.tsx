@@ -147,7 +147,8 @@ export default function SettingsModal({ theme, onThemeChange, onClose, me, onLog
     try {
       const r = await settingsApi.discoverModels({
         base_url: draft?.base_url.trim() || "",
-        api_key: draft?.api_key ?? "", // 未填则服务端回退到该供应商已存 Key
+        api_key: draft?.api_key ?? "", // 未填则服务端按 provider 精确回退到该供应商已存 Key（v0.7.1）
+        provider: draft?.provider ?? "",
       });
       const pid = draft?.provider ?? "custom";
       setDiscoveredBy(cur => ({ ...cur, [pid]: r.models }));

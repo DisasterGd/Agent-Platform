@@ -37,10 +37,12 @@ class SettingsIn(BaseModel):
 
 
 class DiscoverIn(BaseModel):
-    """“获取可用模型”：字段留空则回退到当前生效配置；Key 只在内存中转发给 Base URL，不落盘不记录。"""
+    """“获取可用模型”：Key 留空则回退到**正在编辑的供应商**已存的 Key（v0.7.1 起 provider 精确回退，
+    不再用激活档案——否则会把 A 家的 Key 发给 B 家，必 401）；Key 只在内存中转发给 Base URL，不落盘不记录。"""
 
     base_url: str = ""
     api_key: str = ""
+    provider: str = ""  # 正在编辑的供应商 id（如 qwen/zhipu）：回退凭据时精确取该家的 Key
 
 
 def _view(user_id: int, db: Session) -> dict:
@@ -80,9 +82,17 @@ async def post_discover_models(
     base_url = body.base_url.strip()
     api_key = body.api_key.strip()
     if not base_url or not api_key:
-        cfg = user_settings_service(db, user_id).load()  # 明文只在内存流转到探测函数
-        base_url = base_url or str(cfg.get("base_url") or "")
-        api_key = api_key or str(cfg.get("api_key") or "")
+        service = user_settings_service(db, user_id)
+        provider = body.provider.strip()
+        if provider:
+            # 精确回退：编辑哪一家就用哪一家已存的 Key（绝不串别家的）
+            saved_base_url, saved_api_key = service.resolve_provider_credentials(provider)
+            base_url = base_url or saved_base_url
+            api_key = api_key or saved_api_key
+        else:
+            cfg = service.load()  # 兼容不带 provider 的旧调用：回退激活档案
+            base_url = base_url or str(cfg.get("base_url") or "")
+            api_key = api_key or str(cfg.get("api_key") or "")
     try:
         models = await discover_models(base_url, api_key)
     except DiscoveryError as exc:

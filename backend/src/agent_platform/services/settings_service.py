@@ -245,6 +245,15 @@ class SettingsService:
             base_url = base_url or preset["base_url"]
         return base_url, api_key
 
+    def resolve_provider_credentials(self, provider: str) -> tuple[str, str]:
+        """某供应商已存凭据 (base_url, 明文 api_key)——供"获取可用模型"按家精确回退。
+
+        明文只在内存流转给探测函数（不落盘不回显不记日志）；.env 兜底规则与 resolve_role 一致
+        （仅 local 模式且 provider==.env 那家）。provider 未登记时返回 preset 的 base_url 与空 Key。
+        """
+        data = self._data()
+        return self._profile_credentials(str(provider or "").strip(), data)
+
     def resolve_role(self, role: str) -> dict | None:
         """角色 → 完整可用配置 {provider, base_url, api_key, model}；未配置/无模型名可用时 None。
 
