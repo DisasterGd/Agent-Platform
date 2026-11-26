@@ -3,6 +3,7 @@ import {
   guessBaseUrl, settingsApi,
   type ModelConfig, type Preset, type ProfileView, type RoleDraft, type RoleKey,
 } from "../services/settings";
+import type { MeInfo } from "../services/auth";
 import MemoryPanel from "./MemoryPanel";
 import RoleCard from "./RoleCard";
 import SecretInput from "./SecretInput";
@@ -11,6 +12,9 @@ interface Props {
   theme: "light" | "dark";
   onThemeChange: (t: "light" | "dark") => void;
   onClose: () => void;
+  /** v0.7 账号区（仅 cloud 模式渲染）：当前身份 + 退出登录。 */
+  me?: MeInfo | null;
+  onLogout?: () => void;
 }
 
 /** 凭据草稿：正在编辑哪个供应商的 Base URL / Key。apiKey=null 表示“保留服务器上的”。 */
@@ -54,7 +58,7 @@ function profileHasKey(provider: string, profiles: Record<string, ProfileView>, 
   return profiles[provider]?.has_api_key ?? false;
 }
 
-export default function SettingsModal({ theme, onThemeChange, onClose }: Props) {
+export default function SettingsModal({ theme, onThemeChange, onClose, me, onLogout }: Props) {
   const [tab, setTab] = useState<"model" | "memory">("model");
   const [presets, setPresets] = useState<Record<string, Preset>>({});
   const [profiles, setProfiles] = useState<Record<string, ProfileView>>({});
@@ -179,6 +183,18 @@ export default function SettingsModal({ theme, onThemeChange, onClose }: Props) 
 
         <div className="modal-body">
           {tab === "memory" ? <MemoryPanel /> : (<>
+          {me?.mode === "cloud" && (
+            <section className="set-section">
+              <h3>账号</h3>
+              <div className="account-row">
+                <span className="account-email" title={me.email ?? undefined}>{me.email || `用户 ${me.id}`}</span>
+                {me.is_admin && <span className="account-badge" data-tip="由 .env 的 ADMIN_EMAIL 指定">管理员</span>}
+                {onLogout && (
+                  <button type="button" className="logout-btn" onClick={onLogout}>退出登录</button>
+                )}
+              </div>
+            </section>
+          )}
           <section className="set-section">
             <h3>主题</h3>
             <div className="theme-toggle">

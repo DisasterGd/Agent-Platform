@@ -4,8 +4,11 @@ import { tasksApi } from "./services/tasks";
 import { projectsApi } from "./services/projects";
 import { groupsApi } from "./services/groups";
 import { settingsApi } from "./services/settings";
+import { authApi, type MeInfo } from "./services/auth";
+import { onUnauthorized } from "./services/api";
 import Markdown from "./components/Markdown";
 import SettingsModal from "./components/SettingsModal";
+import LoginView from "./components/LoginView";
 import ConfirmDialog, { type ConfirmState } from "./components/ConfirmDialog";
 import ThinkingTicker, { useThinkingTracker } from "./components/ThinkingTicker";
 import GlobalTip from "./components/GlobalTip";
@@ -69,6 +72,38 @@ function fmtTime(iso: string): string {
 }
 
 export default function App() {
+  // v0.7 认证门：先取身份，登录后才挂载工作台（Workbench）——
+  // 避免未登录时业务请求打出 401、在界面上残留错误并与登录流程竞争。
+  // me: undefined=检查中 / null=未登录 / MeInfo=已登录；任意请求 401 时全局切回登录页。
+  const [me, setMe] = useState<MeInfo | null | undefined>(undefined);
+  useEffect(() => {
+    let alive = true;
+    authApi.me()
+      .then(info => { if (alive) setMe(info); })
+      .catch(() => { if (alive) setMe(null); });
+    const off = onUnauthorized(() => setMe(null));
+    return () => { alive = false; off(); };
+  }, []);
+
+  async function logout() {
+    try { await authApi.logout(); } catch { /* 会话可能已过期：照常回登录页 */ }
+    setMe(null);
+  }
+
+  if (me === undefined) {
+    return (
+      <div className="login-page">
+        <div className="login-card"><p className="login-note">正在检查登录状态…</p></div>
+      </div>
+    );
+  }
+  if (me === null) {
+    return <LoginView onSuccess={setMe} />;
+  }
+  return <Workbench me={me} onLogout={() => void logout()} />;
+}
+
+function Workbench({ me, onLogout }: { me: MeInfo; onLogout: () => void }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -826,7 +861,7 @@ export default function App() {
         </div>
         <div className="topbar-meta">
           <span className="meta-item" data-tip="当前生效的模型配置（设置页可改）">模型 <b>{modelNote}</b></span>
-          <span className="meta-item">v0.6.2</span>
+          <span className="meta-item">v0.7.0</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>
@@ -1051,7 +1086,9 @@ export default function App() {
       />
     )}
     {settingsOpen && (
-      <SettingsModal theme={theme} onThemeChange={setTheme} onClose={() => { setSettingsOpen(false); refreshModelNote(); }} />
+      <SettingsModal theme={theme} onThemeChange={setTheme} me={me} onLogout={onLogout}
+        onClose={() => { setSettingsOpen(false); refreshModelNote(); }}
+      />
     )}
     {confirmState && <ConfirmDialog state={confirmState} onClose={closeConfirm} />}
     <GlobalTip />
