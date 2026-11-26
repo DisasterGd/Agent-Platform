@@ -347,7 +347,7 @@ export default function LibraryModal(props: Props) {
 
   return (
     <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal xxwide lib-modal" onClick={e => e.stopPropagation()}>
+      <div className="modal xxwide fixed lib-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-head">
           <span className="modal-title">资料库</span>
           <em className="lib-total">

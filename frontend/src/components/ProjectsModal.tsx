@@ -56,7 +56,7 @@ export default function ProjectsModal(props: Props) {
 
   return (
     <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal xwide" onClick={e => e.stopPropagation()}>
+      <div className="modal xwide fixed" onClick={e => e.stopPropagation()}>
         <div className="modal-head">
           <span className="modal-title">项目</span>
           <button className="modal-close" data-tip="关闭" onClick={onClose}>×</button>

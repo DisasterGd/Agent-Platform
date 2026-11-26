@@ -880,3 +880,8 @@ button:not(:disabled):active{transform:scale(.97)}
 .logout-btn{flex:none;margin-left:auto;padding:5px 12px;font-size:12px;border:1px solid var(--line-strong);
   border-radius:6px;background:var(--paper);color:var(--ink-soft)}
 .logout-btn:hover{color:var(--signal);border-color:var(--signal)}
+
+/* ===== v0.7.1 固定高度弹窗：head/工具区钉住，内容区内部滚动（资料库/项目） ===== */
+.modal.fixed{height:min(680px,88vh);overflow:hidden;display:flex;flex-direction:column}
+.modal.fixed .modal-body{flex:1;min-height:0;overflow-y:auto}
+.modal.fixed .proj-toolbar{flex:none}
