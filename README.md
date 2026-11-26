@@ -1,4 +1,4 @@
-# Agent Platform v0.7.0
+# Agent Platform v0.7.1
 
 本地优先的智能 Agent 平台：React + TypeScript + Vite、FastAPI、MySQL、SQLAlchemy 2.x、Alembic、SSE，默认接入 DeepSeek（OpenAI 兼容接口）。
 
@@ -260,6 +260,16 @@
   首个管理员由 `.env` 的 `ADMIN_EMAIL` 指定（该邮箱注册即 is_admin）
 - **前端**：新增登录页（邮箱 → 验证码两步卡片，仅 cloud 模式出现）；App 启动先调 `/auth/me`，
   任意请求 401 自动切回登录页；设置弹窗新增账号区（邮箱/管理员徽标/退出登录）；local 模式界面零变化
+
+**v0.7.1（实测问题修复：按供应商回退的“获取可用模型” · 资料库/项目弹窗固定尺寸）**
+
+- **修复“获取可用模型”跨厂商 401**：Key 留空时服务端回退的是**激活档案**的 Key——激活 DeepSeek 时点
+  “通义千问”的获取按钮，会把 DeepSeek 的 Key 发给百炼，必 401（2026-11-26 实测报障）。现改为请求带
+  `provider`、按**正在编辑的供应商**精确回退已存 Key（绝不串别家）；未登记的供应商如实报“API Key 为空”。
+  实测：qwen 空 Key 拉回 191 个实时模型。注意：**智谱官方 Key 格式为 `{id}.{secret}`（不含 sk- 前缀）**，
+  输入其他格式的 Key 会被智谱如实拒绝（401 令牌过期/不正确）——请到 open.bigmodel.cn 复制正确 Key
+- **资料库/项目弹窗固定尺寸**：不再随内容伸缩——固定 `min(680px, 88vh)` 高度，标题栏/页签/工具区钉住，
+  文件列表在内容区**内部滚动**（文件多时不再撑高弹窗或溢出屏幕）；“项目”弹窗同款设计
 
 部署为多用户服务（cloud 模式）时：`.env` 设 `AUTH_MODE=cloud`、`SERVICE_SECRET=<随机长串>`、
 `ADMIN_EMAIL=<你的邮箱>`、（可选）`INVITE_CODE=<邀请码>` 与 `MAIL_PROVIDER=smtp` + SMTP 授权码；
