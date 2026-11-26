@@ -1,4 +1,4 @@
-# Agent Platform v0.5.0
+# Agent Platform v0.7.0
 
 本地优先的智能 Agent 平台：React + TypeScript + Vite、FastAPI、MySQL、SQLAlchemy 2.x、Alembic、SSE，默认接入 DeepSeek（OpenAI 兼容接口）。
 
@@ -235,7 +235,35 @@
   就绪 LED 呼吸、主区台灯位微光漂移、欢迎信标雷达圈；弹窗/消息入场编排一次到位；按钮按下有物理（抬起+微光掠过）；
   全部动效尊重 `prefers-reduced-motion`；补内联 favicon
 
-当前开发用户 ID 仅用于本地单用户开发，不是身份认证；公网部署前必须实现真实认证和服务端权限校验。
+**v0.7.0（账号体系：双模式 + 邮箱验证码登录 + 数据隔离 + 管理员）**
+
+- **双模式运行（一个代码库，差异只在配置与认证）**：`AUTH_MODE=local`（默认）单用户免登录、行为与 v0.6 完全一致；
+  `AUTH_MODE=cloud` 邮箱验证码登录、按用户隔离数据/文件/设置。`get_current_user_id()` 是全系统唯一身份来源
+  （local=DEV_USER_ID；cloud=解析 `ap_session` cookie，未登录 401），全部路由经依赖注入、路由层零改动
+- **登录注册合一（无密码方案）**：`POST /auth/request-code` 发 6 位验证码（只存 SHA-256 哈希，10 分钟有效、错 5 次作废，
+  统一 204 不区分邮箱是否存在——防枚举）→ `POST /auth/verify` 验证即登录，邮箱没注册过就自动建号（display_name 取 @ 前段）；
+  会话用**服务端 sessions 表 + HttpOnly cookie**（不用 JWT：可撤销、封号即时生效、30 天滑动续期）
+- **防滥用**：发码频控（每邮箱 1 次/分钟、5 次/小时、10 次/天，每 IP 20 次/天，auth_codes 计数零新依赖）；
+  注册邀请码（`.env` 的 `INVITE_CODE`，配了则首次注册必填）；邮件通道 `MailProvider` 抽象——
+  `MAIL_PROVIDER=console`（默认，验证码打控制台，本地调试 cloud 模式用）或 `smtp`（QQ/163 授权码，零新依赖）
+- **数据隔离收口**（设计文档审计清单逐项修复）：PATCH/DELETE 会话、列消息、两个 SSE 对话流补归属校验（非本人一律 404，不暴露存在性）；
+  文件下载按请求者定位磁盘；`test_isolation.py` HTTP 层隔离套件（两用户互访全部 404/不可见）
+- **文件 per-user 目录**：`data/{uploads,generated}/u{user_id}/`——磁盘目录本身就是归属边界；
+  唯一约束改 `(user_id, category, stored_name)`（迁移 `0012`）；存量文件启动时自动搬入 `u1/`
+  （也可手动跑 `scripts/migrate_files_to_user_dirs.py`），**老消息下载链接全部照常可用**
+- **设置上云**：`SettingsStore` 双后端——local=`data/settings.json` 单文件（行为不变）、cloud=`user_settings` 表按用户隔离；
+  BYOK：每个用户自带各厂商 Key，互不可见；**修复云部署漏洞：.env 的 LLM_API_KEY 兜底仅限 local 模式**（否则会把宿主机 Key 送给所有用户）
+- **Key 加密双后端**：local=Windows DPAPI（现状），cloud=Fernet（`SERVICE_SECRET` 派生密钥，新增 `cryptography` 依赖；
+  缺 SERVICE_SECRET 拒绝加密——宁可启动报错也不明文落盘）；密文按前缀互认，跨后端历史数据兼容
+- **管理员最小三件套**（不做 RBAC，admin 不读他人业务数据）：`GET /admin/users`（搜索/分页）、
+  `PATCH /admin/users/{id}`（停用即撤销全部会话——踢下线）、`GET /admin/stats`（用户数/各表行数/磁盘占用）；
+  首个管理员由 `.env` 的 `ADMIN_EMAIL` 指定（该邮箱注册即 is_admin）
+- **前端**：新增登录页（邮箱 → 验证码两步卡片，仅 cloud 模式出现）；App 启动先调 `/auth/me`，
+  任意请求 401 自动切回登录页；设置弹窗新增账号区（邮箱/管理员徽标/退出登录）；local 模式界面零变化
+
+部署为多用户服务（cloud 模式）时：`.env` 设 `AUTH_MODE=cloud`、`SERVICE_SECRET=<随机长串>`、
+`ADMIN_EMAIL=<你的邮箱>`、（可选）`INVITE_CODE=<邀请码>` 与 `MAIL_PROVIDER=smtp` + SMTP 授权码；
+验证码邮件没配 SMTP 时打到后端控制台（本地调试）。方案细节见 `docs/design-v0.7-v0.8.md`。
 
 ## 环境要求
 
@@ -397,10 +425,10 @@ data/                        上传与生成的文件、settings.json（gitignor
 | v0.2 | 工具调用 | 让模型能够使用外部工具 | ✅ |
 | v0.3 | 任务规划与执行 | 支持多步骤任务 | ✅ |
 | v0.4 | 记忆系统 | 保存和检索长期记忆 | ✅ |
-| v0.5 | 知识库 | 支持文档上传、切块和检索 | 🔨 当前（上传类型扩展、代码/压缩包生成、资料库已完成；切块与检索待做） |
-| v0.6 | 多模型管理 | 支持不同模型切换 | 下一步 |
-| v0.7 | 账号体系 | 注册、登录、权限管理 | |
-| v0.8 | 云端部署 | 多用户在线服务 | |
+| v0.5 | 知识库 | 支持文档上传、切块和检索 | ✅（v0.6.1 收尾切块与检索） |
+| v0.6 | 多模型管理 | 支持不同模型切换 | ✅（v0.6.2 向量检索 + 生图实测） |
+| v0.7 | 账号体系 | 注册、登录、权限管理 | ✅（v0.7.0 双模式 + 验证码登录 + 隔离 + 管理员） |
+| v0.8 | 云端部署 | 多用户在线服务 | 下一步（方案见 `docs/design-v0.7-v0.8.md`：Docker 三件套 + Cloudflare Tunnel） |
 | v0.9 | 桌面启动器 | Windows 双击启动与云端连接 | |
 | v1.0 | 完整 Agent 平台 | 安全、稳定、可扩展 | |
 
