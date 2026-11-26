@@ -885,3 +885,9 @@ button:not(:disabled):active{transform:scale(.97)}
 .modal.fixed{height:min(680px,88vh);overflow:hidden;display:flex;flex-direction:column}
 .modal.fixed .modal-body{flex:1;min-height:0;overflow-y:auto}
 .modal.fixed .proj-toolbar{flex:none}
+
+/* ===== v0.7.2 设置弹窗「账号管理」页签 ===== */
+.account-card{border:1px solid var(--line);border-radius:8px;padding:14px 16px;background:var(--paper)}
+.login-form{display:flex;flex-direction:column;gap:12px;max-width:360px}
+.account-mode-chip{flex:none;font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid var(--line-strong);color:var(--ink-soft);white-space:nowrap}
+.account-mode-chip.cloud{background:rgba(198,60,44,.10);color:var(--signal);border-color:rgba(198,60,44,.25)}

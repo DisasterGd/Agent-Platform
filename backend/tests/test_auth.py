@@ -286,3 +286,45 @@ def test_migrate_root_files_to_user_dirs_is_idempotent(tmp_path, monkeypatch: py
     assert migrate_root_files_to_user_dirs(2) == 0  # 目标已存在 → 跳过
     assert (store.user_dir("uploads", 2) / "同名.md").read_bytes() == b"user2"
     assert (store.uploads / "同名.md").read_bytes() == b"root"
+
+
+def test_local_mode_first_login_binds_dev_account(
+    db: Session, outbox: list[dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v0.7.2 本地模式登录语义：首次登录绑定本地默认账号（数据保留、可随时登录取回），之后的邮箱建新号。"""
+    from agent_platform.repositories.users import UserRepository
+
+    monkeypatch.setattr(settings, "auth_mode", "local")
+    _relax_per_minute(monkeypatch)
+    UserRepository(db).ensure_user(settings.dev_user_id, "developer")
+
+    code = _request(db, "owner@example.com", outbox)
+    user, token = _verify(db, "owner@example.com", code)
+    assert user.id == settings.dev_user_id          # 绑定到本地默认账号，不是建新号
+    assert user.email == "owner@example.com"
+    assert user.display_name == "owner"
+
+    code2 = _request(db, "owner@example.com", outbox)
+    user2, _ = _verify(db, "owner@example.com", code2)
+    assert user2.id == settings.dev_user_id          # 已绑定邮箱：登录即取回该账号
+
+    code3 = _request(db, "second@example.com", outbox)
+    user3, _ = _verify(db, "second@example.com", code3)
+    assert user3.id != settings.dev_user_id          # 新邮箱 → 新账号（本机多账号）
+    assert user3.email == "second@example.com"
+    # 默认账号的数据不受影响
+    assert UserRepository(db).get(settings.dev_user_id).email == "owner@example.com"
+
+
+def test_local_mode_cloud_already_bound_creates_normally(
+    db: Session, outbox: list[dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """cloud 模式没有"绑定默认账号"逻辑：任何新邮箱都是新号（隔离语义不变）。"""
+    monkeypatch.setattr(settings, "auth_mode", "cloud")
+    from agent_platform.repositories.users import UserRepository
+
+    UserRepository(db).ensure_user(settings.dev_user_id, "developer")  # 即使存在无邮箱的默认账号
+    code = _request(db, "fresh@example.com", outbox)
+    user, _ = _verify(db, "fresh@example.com", code)
+    assert user.id != settings.dev_user_id
+    assert user.email == "fresh@example.com"

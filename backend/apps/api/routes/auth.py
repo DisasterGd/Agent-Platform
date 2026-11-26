@@ -66,7 +66,7 @@ def verify(body: VerifyIn, request: Request, response: Response, db: Session = D
     except auth_service.AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     _set_session_cookie(response, token)
-    return _me_payload(user)
+    return _me_payload(user, via_session=True)
 
 
 @router.post("/auth/logout", status_code=204)
@@ -78,28 +78,36 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)) 
     return Response(status_code=204)
 
 
-def _me_payload(user) -> dict:
-    """身份视图（v0.7 决策：/auth/me 返回 {id, mode, email?, is_admin?}，前端据此决定登录页）。"""
+def _me_payload(user, via_session: bool) -> dict:
+    """身份视图（v0.7 决策：/auth/me 返回 {id, mode, email?, is_admin?}，前端据此决定登录页）。
+
+    v0.7.2 增加 via_session：当前身份是否来自已登录会话（local 模式 False=本地默认身份未登录）。
+    """
     return {
         "id": user.id,
         "mode": settings.auth_mode,
         "email": user.email,
         "display_name": user.display_name or "",
         "is_admin": bool(user.is_admin),
+        "via_session": via_session,
     }
 
 
 @router.get("/auth/me")
 def me(
+    request: Request,
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> dict:
-    """当前身份。local 模式恒 200（dev 用户）；cloud 未登录由依赖层抛 401。"""
+    """当前身份。local 模式恒 200（dev 用户或已登录账号）；cloud 未登录由依赖层抛 401。"""
     from agent_platform.repositories.users import UserRepository
 
     user = UserRepository(db).get(user_id)
     if user is None:
         # local 模式下 dev 用户缺失（理论上启动时已补种）：按占位返回，避免前端卡死
         return {"id": user_id, "mode": settings.auth_mode, "email": None,
-                "display_name": "", "is_admin": False}
-    return _me_payload(user)
+                "display_name": "", "is_admin": False, "via_session": False}
+    via_session = auth_service.resolve_session(
+        db, request.cookies.get(auth_service.SESSION_COOKIE) or ""
+    ) is not None
+    return _me_payload(user, via_session)

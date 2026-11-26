@@ -1,6 +1,8 @@
-/** v0.7 登录页（仅 cloud 模式出现）：邮箱 → 验证码两步卡片。
+/** v0.7 登录表单：邮箱 → 验证码两步卡片（登录注册合一）。
  *
- * 登录注册合一：邮箱没注册过，验证通过即注册（邀请码仅首次注册需要）。
+ * - LoginView：cloud 模式未登录时的全屏登录页；
+ * - LoginForm：可复用表单本体，设置弹窗「账号管理」页签也用它（v0.7.2 起 local 模式可随时登录）。
+ *
  * 防枚举由服务端保证（发码统一 204），本页只如实转述服务端错误（频控/验证码错等）。
  */
 import { useEffect, useRef, useState } from "react";
@@ -8,7 +10,14 @@ import { authApi, type MeInfo } from "../services/auth";
 
 const RESEND_SECONDS = 60;
 
-export default function LoginView({ onSuccess }: { onSuccess: (me: MeInfo) => void }) {
+export function LoginForm({
+  onSuccess,
+  bindNote,
+}: {
+  onSuccess: (me: MeInfo) => void;
+  /** 本地模式的绑定提示：默认账号还没有邮箱时显示"首次登录将绑定当前账号"。 */
+  bindNote?: string;
+}) {
   const [step, setStep] = useState<"email" | "code">("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -57,6 +66,65 @@ export default function LoginView({ onSuccess }: { onSuccess: (me: MeInfo) => vo
   }
 
   return (
+    <div className="login-form">
+      {step === "email" ? (
+        <>
+          <label className="login-label" htmlFor="login-email">邮箱</label>
+          <input
+            id="login-email" ref={emailRef} className="login-input" type="email"
+            placeholder="you@example.com" autoComplete="email" value={email}
+            disabled={busy}
+            onChange={e => setEmail(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") void requestCode(); }}
+          />
+          <button className="login-btn" disabled={busy || !email.trim() || cooldown > 0}
+            onClick={() => void requestCode()}>
+            {busy ? "发送中…" : cooldown > 0 ? `重新发送（${cooldown}s）` : "获取验证码"}
+          </button>
+        </>
+      ) : (
+        <>
+          <label className="login-label" htmlFor="login-code">验证码</label>
+          <input
+            id="login-code" className="login-input login-code" type="text" inputMode="numeric"
+            placeholder="6 位数字" maxLength={6} value={code} disabled={busy}
+            onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
+            onKeyDown={e => { if (e.key === "Enter") void verify(); }}
+          />
+          <label className="login-label" htmlFor="login-invite">
+            邀请码 <em>（仅首次注册需要；没有可留空）</em>
+          </label>
+          <input
+            id="login-invite" className="login-input" type="text"
+            placeholder="如已配置邀请码请填写" value={invite} disabled={busy}
+            onChange={e => setInvite(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") void verify(); }}
+          />
+          <button className="login-btn" disabled={busy || !code.trim()}
+            onClick={() => void verify()}>
+            {busy ? "验证中…" : "登录 / 注册"}
+          </button>
+          <div className="login-sub">
+            <button type="button" className="login-link" onClick={() => { setStep("email"); setCode(""); setError(""); setNote(""); }}>
+              ← 换一个邮箱
+            </button>
+            <button type="button" className="login-link" disabled={busy || cooldown > 0}
+              onClick={() => void requestCode()}>
+              {cooldown > 0 ? `重新发送（${cooldown}s）` : "重新发送验证码"}
+            </button>
+          </div>
+        </>
+      )}
+
+      {bindNote && step === "email" && !error && <p className="login-note">{bindNote}</p>}
+      {note && !error && <p className="login-note">{note}</p>}
+      {error && <p className="login-error">{error}</p>}
+    </div>
+  );
+}
+
+export default function LoginView({ onSuccess }: { onSuccess: (me: MeInfo) => void }) {
+  return (
     <div className="login-page">
       <div className="login-card">
         <div className="login-brand">
@@ -66,58 +134,7 @@ export default function LoginView({ onSuccess }: { onSuccess: (me: MeInfo) => vo
             <span>登录后开始使用</span>
           </div>
         </div>
-
-        {step === "email" ? (
-          <>
-            <label className="login-label" htmlFor="login-email">邮箱</label>
-            <input
-              id="login-email" ref={emailRef} className="login-input" type="email"
-              placeholder="you@example.com" autoComplete="email" value={email}
-              disabled={busy}
-              onChange={e => setEmail(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") void requestCode(); }}
-            />
-            <button className="login-btn" disabled={busy || !email.trim() || cooldown > 0}
-              onClick={() => void requestCode()}>
-              {busy ? "发送中…" : cooldown > 0 ? `重新发送（${cooldown}s）` : "获取验证码"}
-            </button>
-          </>
-        ) : (
-          <>
-            <label className="login-label" htmlFor="login-code">验证码</label>
-            <input
-              id="login-code" className="login-input login-code" type="text" inputMode="numeric"
-              placeholder="6 位数字" maxLength={6} value={code} disabled={busy}
-              onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
-              onKeyDown={e => { if (e.key === "Enter") void verify(); }}
-            />
-            <label className="login-label" htmlFor="login-invite">
-              邀请码 <em>（仅首次注册需要；没有可留空）</em>
-            </label>
-            <input
-              id="login-invite" className="login-input" type="text"
-              placeholder="如已配置邀请码请填写" value={invite} disabled={busy}
-              onChange={e => setInvite(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") void verify(); }}
-            />
-            <button className="login-btn" disabled={busy || !code.trim()}
-              onClick={() => void verify()}>
-              {busy ? "验证中…" : "登录 / 注册"}
-            </button>
-            <div className="login-sub">
-              <button type="button" className="login-link" onClick={() => { setStep("email"); setCode(""); setError(""); setNote(""); }}>
-                ← 换一个邮箱
-              </button>
-              <button type="button" className="login-link" disabled={busy || cooldown > 0}
-                onClick={() => void requestCode()}>
-                {cooldown > 0 ? `重新发送（${cooldown}s）` : "重新发送验证码"}
-              </button>
-            </div>
-          </>
-        )}
-
-        {note && !error && <p className="login-note">{note}</p>}
-        {error && <p className="login-error">{error}</p>}
+        <LoginForm onSuccess={onSuccess} />
         <p className="login-hint">首次使用：验证通过即自动创建账号，无需密码。</p>
       </div>
     </div>

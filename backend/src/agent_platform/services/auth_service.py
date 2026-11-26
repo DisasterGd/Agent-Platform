@@ -123,6 +123,13 @@ def verify_code(db: Session, email: str, code: str, invite_code: str = "", ip: s
 
     users = UserRepository(db)
     user = users.get_by_email(email)
+    if user is None and settings.auth_mode == "local":
+        # 本地模式首次登录：把邮箱绑定到本地默认账号（而非建新号）——
+        # 已有的全部数据保留原归属，此后通过登录即可随时取回；绑定不需要邀请码。
+        dev_user = users.get(settings.dev_user_id)
+        if dev_user is not None and not dev_user.email:
+            users.bind_email(dev_user.id, email, email.split("@", 1)[0])
+            user = dev_user
     if user is None:
         # 注册环节：.env 配了邀请码则必须正确（决策点 #2）
         expected = (settings.invite_code or "").strip()

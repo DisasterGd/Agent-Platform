@@ -85,11 +85,6 @@ export default function App() {
     return () => { alive = false; off(); };
   }, []);
 
-  async function logout() {
-    try { await authApi.logout(); } catch { /* 会话可能已过期：照常回登录页 */ }
-    setMe(null);
-  }
-
   if (me === undefined) {
     return (
       <div className="login-page">
@@ -100,10 +95,10 @@ export default function App() {
   if (me === null) {
     return <LoginView onSuccess={setMe} />;
   }
-  return <Workbench me={me} onLogout={() => void logout()} />;
+  return <Workbench me={me} />;
 }
 
-function Workbench({ me, onLogout }: { me: MeInfo; onLogout: () => void }) {
+function Workbench({ me }: { me: MeInfo }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -1086,7 +1081,13 @@ function Workbench({ me, onLogout }: { me: MeInfo; onLogout: () => void }) {
       />
     )}
     {settingsOpen && (
-      <SettingsModal theme={theme} onThemeChange={setTheme} me={me} onLogout={onLogout}
+      <SettingsModal theme={theme} onThemeChange={setTheme} me={me}
+        onLogout={async () => {
+          // 登出后整页重载：local 回到本地默认身份（数据重载），cloud 由登录页接管
+          try { await authApi.logout(); } catch { /* 会话可能已过期：照常重载 */ }
+          window.location.reload();
+        }}
+        onLoginSuccess={() => window.location.reload()}
         onClose={() => { setSettingsOpen(false); refreshModelNote(); }}
       />
     )}

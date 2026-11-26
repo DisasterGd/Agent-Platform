@@ -50,6 +50,21 @@ class UserRepository:
         self.db.refresh(user)
         return user
 
+    def bind_email(self, user_id: int, email: str, display_name: str = "") -> User | None:
+        """把邮箱绑定到既有账号（v0.7.2 本地模式"首次登录绑定默认账号"用）。
+
+        绑定后该邮箱即可通过验证码登录此账号、取回它的全部已有数据；display_name 缺省时补邮箱前段。
+        """
+        user = self.db.get(User, user_id)
+        if user is None:
+            return None
+        user.email = email
+        if not user.display_name and display_name:
+            user.display_name = display_name[:120]
+        self.db.commit()
+        self.db.refresh(user)
+        return user
+
     def touch_login(self, user_id: int) -> None:
         """登录成功时刻（last_login_at，供 admin 列表展示）。"""
         user = self.db.get(User, user_id)

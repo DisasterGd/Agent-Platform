@@ -4,6 +4,7 @@ import {
   type ModelConfig, type Preset, type ProfileView, type RoleDraft, type RoleKey,
 } from "../services/settings";
 import type { MeInfo } from "../services/auth";
+import { LoginForm } from "./LoginView";
 import MemoryPanel from "./MemoryPanel";
 import RoleCard from "./RoleCard";
 import SecretInput from "./SecretInput";
@@ -12,9 +13,11 @@ interface Props {
   theme: "light" | "dark";
   onThemeChange: (t: "light" | "dark") => void;
   onClose: () => void;
-  /** v0.7 账号区（仅 cloud 模式渲染）：当前身份 + 退出登录。 */
+  /** v0.7 账号管理（第一个页签）：当前身份 + 登录/注册 + 退出登录。 */
   me?: MeInfo | null;
   onLogout?: () => void;
+  /** 登录成功后回调：本机切换账号 / 云端重新登录，数据需整体重载。 */
+  onLoginSuccess?: () => void;
 }
 
 /** 凭据草稿：正在编辑哪个供应商的 Base URL / Key。apiKey=null 表示“保留服务器上的”。 */
@@ -58,8 +61,68 @@ function profileHasKey(provider: string, profiles: Record<string, ProfileView>, 
   return profiles[provider]?.has_api_key ?? false;
 }
 
-export default function SettingsModal({ theme, onThemeChange, onClose, me, onLogout }: Props) {
-  const [tab, setTab] = useState<"model" | "memory">("model");
+/** v0.7.2 账号管理页签：当前身份卡 + 登录/注册表单（local/cloud 双模式同一入口）。 */
+function AccountPanel({
+  me, onLogout, onLoginSuccess,
+}: {
+  me?: MeInfo | null;
+  onLogout?: () => void;
+  onLoginSuccess?: () => void;
+}) {
+  if (!me) {
+    return <div className="s-empty">正在读取身份…</div>;
+  }
+  const isLocal = me.mode !== "cloud";
+  const viaSession = me.via_session === true;
+  const bindNote = isLocal && !me.email
+    ? "首次登录将把邮箱绑定到当前本地账号：已有全部数据保留原位，此后随时登录即可取回。"
+    : undefined;
+  return (
+    <>
+      <section className="set-section">
+        <h3>当前身份</h3>
+        <div className="account-card">
+          <div className="account-row">
+            <span className={`account-mode-chip ${isLocal ? "local" : "cloud"}`}>
+              {isLocal ? "本地模式" : "云端模式"}
+            </span>
+            <span className="account-email" title={me.email ?? undefined}>
+              {me.email || (isLocal ? "本地账号（未绑定邮箱）" : "未登录")}
+            </span>
+            {me.is_admin && <span className="account-badge" data-tip="由 .env 的 ADMIN_EMAIL 指定">管理员</span>}
+            {viaSession && onLogout && (
+              <button type="button" className="logout-btn" onClick={onLogout}>退出登录</button>
+            )}
+          </div>
+          <p className="set-note">
+            {isLocal
+              ? "本地模式无需登录即可使用全部功能，数据保存在本机。登录后可切换本机的多个账号（数据互相隔离）；将来部署为云端服务后，用同一入口登录即可取回你在该服务器账号下的会话与文件。"
+              : "登录会话 30 天滑动有效；退出后需重新登录。各账号的数据（会话/文件/模型配置）完全隔离。"}
+          </p>
+        </div>
+      </section>
+
+      <section className="set-section">
+        <h3>{isLocal ? (me.email ? "登录本机账号" : "登录 / 注册") : "登录 / 注册"}</h3>
+        {isLocal && me.email && (
+          <p className="set-note">
+            当前默认账号已绑定 <b>{me.email}</b>。输入其它邮箱可创建/登录本机的其它账号，各自的数据互相隔离。
+          </p>
+        )}
+        <LoginForm onSuccess={() => onLoginSuccess?.()} bindNote={bindNote} />
+        <p className="login-hint">
+          {isLocal
+            ? "验证码由后端邮件通道发送（MAIL_PROVIDER=console 时打印在后端控制台，本地调试零配置）。"
+            : "首次使用：验证通过即自动创建账号，无需密码。"}
+        </p>
+      </section>
+    </>
+  );
+}
+
+export default function SettingsModal({ theme, onThemeChange, onClose, me, onLogout, onLoginSuccess }: Props) {
+  // v0.7.2：账号管理为第一个页签（默认打开）
+  const [tab, setTab] = useState<"account" | "model" | "memory">("account");
   const [presets, setPresets] = useState<Record<string, Preset>>({});
   const [profiles, setProfiles] = useState<Record<string, ProfileView>>({});
   const [config, setConfig] = useState<ModelConfig | null>(null);
@@ -178,24 +241,15 @@ export default function SettingsModal({ theme, onThemeChange, onClose, me, onLog
         </div>
 
         <div className="modal-tabs">
+          <button type="button" className={tab === "account" ? "on" : ""} onClick={() => setTab("account")}>账号</button>
           <button type="button" className={tab === "model" ? "on" : ""} onClick={() => setTab("model")}>模型</button>
           <button type="button" className={tab === "memory" ? "on" : ""} onClick={() => setTab("memory")}>记忆</button>
         </div>
 
         <div className="modal-body">
-          {tab === "memory" ? <MemoryPanel /> : (<>
-          {me?.mode === "cloud" && (
-            <section className="set-section">
-              <h3>账号</h3>
-              <div className="account-row">
-                <span className="account-email" title={me.email ?? undefined}>{me.email || `用户 ${me.id}`}</span>
-                {me.is_admin && <span className="account-badge" data-tip="由 .env 的 ADMIN_EMAIL 指定">管理员</span>}
-                {onLogout && (
-                  <button type="button" className="logout-btn" onClick={onLogout}>退出登录</button>
-                )}
-              </div>
-            </section>
-          )}
+          {tab === "account" ? (
+            <AccountPanel me={me} onLogout={onLogout} onLoginSuccess={onLoginSuccess} />
+          ) : tab === "memory" ? <MemoryPanel /> : (<>
           <section className="set-section">
             <h3>主题</h3>
             <div className="theme-toggle">
@@ -227,7 +281,7 @@ export default function SettingsModal({ theme, onThemeChange, onClose, me, onLog
 
           <section className="set-section">
             <h3>供应商凭据</h3>
-            <p className="set-note">这里只编辑**一个供应商**的 Base URL 与 API Key（各供应商互相独立、互不覆写）；上方的角色决定谁干活。</p>
+            <p className="set-note">这里只编辑<b>一个供应商</b>的 Base URL 与 API Key（各供应商互相独立、互不覆写）；上方的角色决定谁干活。</p>
             <div className="preset-row">
               {Object.entries(presets).map(([id, p]) => (
                 <button key={id} type="button" className={`preset ${draft?.provider === id ? "on" : ""}`}

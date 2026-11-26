@@ -8,6 +8,8 @@ export interface MeInfo {
   email: string | null;
   display_name: string;
   is_admin: boolean;
+  /** v0.7.2：当前身份是否来自已登录会话（local 模式 false=本地默认身份未登录）。 */
+  via_session: boolean;
 }
 
 export const authApi = {
