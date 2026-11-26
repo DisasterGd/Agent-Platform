@@ -37,11 +37,12 @@ async def upload_file(
         filename=name,
         content=content,
         content_type=file.content_type or content_type_for(name),
+        user_id=user_id,  # v0.7：落进请求者自己的目录（u{user_id}/）
     )
     # 登记资料库：上传此刻还不知道会进哪个会话，归属在发送消息时补写
     asset = LibraryService(db).register_saved(stored, user_id=user_id, source="upload")
     # v0.6.1 知识库：上传即尝试切块（图片/二进制自然跳过；异常只吞断，绝不阻断上传）
-    KnowledgeService(db).auto_index(int(asset["id"]))
+    KnowledgeService(db, user_id=user_id).auto_index(int(asset["id"]))
     return {**stored.to_dict(), "asset_id": asset["id"], "kind_label": asset["kind_label"]}
 
 
@@ -50,15 +51,20 @@ def download_file(
     category: str,
     name: str,
     inline: bool = Query(False, description="true=浏览器内预览（图像/音视频/文本），false=作为附件下载"),
+    user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> FileResponse:
+    """下载/预览：URL 形状不变（历史链接承诺延续），但**按请求者定位磁盘文件**——
+
+    v0.7 per-user 目录本身就是归属边界：A 的链接在 B 的会话里解析到 B 的目录 → 找不到 → 404。
+    """
     storage = get_storage()
     if category not in ("uploads", "generated"):
         raise HTTPException(status_code=404, detail="文件不存在")
-    path = storage.resolve(category, name)
+    path = storage.resolve(category, name, user_id)
     if path is None:
         raise HTTPException(status_code=404, detail="文件不存在")
-    display = LibraryService(db).display_name(category, name) or name
+    display = LibraryService(db).display_name(category, name, user_id) or name
     return FileResponse(
         path,
         filename=display,

@@ -13,7 +13,6 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent_platform.config import settings
 from agent_platform.core.agent import Agent
 from agent_platform.core.context import MEMORY_HEADER
 from agent_platform.core.events import (
@@ -53,9 +52,14 @@ def _clip(text: str, limit: int = 600) -> str:
 
 
 class Runner:
-    def __init__(self, model: ChatModel | None = None, tools: ToolRegistry | None = None) -> None:
+    def __init__(
+        self, model: ChatModel | None = None, tools: ToolRegistry | None = None,
+        user_id: int | None = None,
+    ) -> None:
         self.model = model
         self.tools = tools
+        # v0.7：产物校验按用户目录定位（per-user 存储）
+        self.user_id = user_id
         self.outcomes: list[StepOutcome] = []
 
     async def run(
@@ -140,17 +144,16 @@ class Runner:
         lines.append(f"\n当前步骤（只完成这一步）：{title}\n要求：{detail}")
         return "\n".join(lines)
 
-    @staticmethod
-    def _artifact_exists(artifact: dict[str, Any]) -> bool:
-        """程序化校验：generate_file 声明的文件必须真的在 generated 目录里。
+    def _artifact_exists(self, artifact: dict[str, Any]) -> bool:
+        """程序化校验：generate_file 声明的文件必须真的在当前用户的 generated 目录里。
 
         存储层落盘用可读文件名（清洗非法字符、重名自动加序号），artifact 的
         stored_name 即磁盘真实名，校验以此为准；没有 stored_name 才退回按 filename 查找。
         """
         stored_name = str(artifact.get("stored_name", "")).strip()
         if stored_name:
-            return get_storage().resolve("generated", stored_name) is not None
+            return get_storage().resolve("generated", stored_name, self.user_id) is not None
         filename = str(artifact.get("filename", "")).strip()
         if not filename:
             return True  # 无文件名的 artifact（如非文件类产出）不做存在性校验
-        return (settings.generated_dir / filename).is_file()
+        return get_storage().resolve("generated", filename, self.user_id) is not None

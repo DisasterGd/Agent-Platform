@@ -16,8 +16,8 @@ MAX_EXTRACT_BYTES = 512 * 1024  # 单个附件最多读 512KB 正文
 TRUNCATED_NOTE = "\n…（正文过长，已截断）"
 
 
-def _read_bytes(category: str, stored_name: str, limit: int | None = None) -> bytes | None:
-    return get_storage().read_bytes(category, stored_name, limit)
+def _read_bytes(category: str, stored_name: str, limit: int | None = None, user_id: int | None = None) -> bytes | None:
+    return get_storage().read_bytes(category, stored_name, limit, user_id=user_id)
 
 
 def _decode(data: bytes) -> str:
@@ -29,17 +29,19 @@ def _decode(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def extract_text(category: str, stored_name: str, content_type: str) -> str | None:
-    """提取文本附件正文；无法识别（如图片、压缩包）返回 None。"""
+def extract_text(
+    category: str, stored_name: str, content_type: str, user_id: int | None = None
+) -> str | None:
+    """提取文本附件正文；无法识别（如图片、压缩包）返回 None。user_id 限定读取该用户目录。"""
     name = (stored_name or "").lower()
     ct = (content_type or "").lower()
     if name.endswith(".pdf"):
-        data = _read_bytes(category, stored_name)
+        data = _read_bytes(category, stored_name, user_id=user_id)
         return _extract_pdf(data) if data else None
     if name.endswith(".docx"):
-        data = _read_bytes(category, stored_name)
+        data = _read_bytes(category, stored_name, user_id=user_id)
         return _extract_docx(data) if data else None
-    data = _read_bytes(category, stored_name)
+    data = _read_bytes(category, stored_name, user_id=user_id)
     if data is None:
         return None
     if not ft.is_readable_text(name, data, ct):
@@ -71,9 +73,11 @@ def _extract_docx(data: bytes) -> str | None:
     return text or None
 
 
-def image_to_data_uri(category: str, stored_name: str, content_type: str) -> str | None:
+def image_to_data_uri(
+    category: str, stored_name: str, content_type: str, user_id: int | None = None
+) -> str | None:
     """把图片读成 base64 data URI，供视觉模型识图。"""
-    data = _read_bytes(category, stored_name)
+    data = _read_bytes(category, stored_name, user_id=user_id)
     if data is None:
         return None
     b64 = base64.b64encode(data).decode("ascii")

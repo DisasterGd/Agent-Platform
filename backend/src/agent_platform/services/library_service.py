@@ -75,7 +75,7 @@ class LibraryService:
         category, stored_name = parsed
         filename = str(artifact.get("filename") or stored_name)
         content_type = str(artifact.get("content_type") or "") or ft.content_type_for(filename)
-        path = get_storage().resolve(category, stored_name)
+        path = get_storage().resolve(category, stored_name, user_id)
         size = int(artifact.get("size") or 0)
         if not size and path is not None:
             try:
@@ -98,7 +98,7 @@ class LibraryService:
         )
 
     def link_attachments(
-        self, attachments: list[dict], *, conversation_id: int, project_id: int | None
+        self, attachments: list[dict], *, user_id: int, conversation_id: int, project_id: int | None
     ) -> int:
         """消息落库后补写归属：上传附件在上传时还不知道会进哪个会话/项目。"""
         names: list[str] = []
@@ -108,14 +108,14 @@ class LibraryService:
                 names.append(parsed[1])
         if not names:
             return 0
-        return self.assets.link_uploads(names, conversation_id, project_id)
+        return self.assets.link_uploads(names, conversation_id, project_id, user_id=user_id)
 
     def scan_existing(self, user_id: int) -> int:
-        """存量扫描：把磁盘上有、表里没有的历史文件登记为“未归类”资料库条目。"""
+        """存量扫描：把该用户目录下有、表里没有的历史文件登记为"未归类"资料库条目。"""
         registered = 0
         for category in ("uploads", "generated"):
-            for name, size in get_storage().iter_files(category):
-                if self.assets.find(category, name) is not None:
+            for name, size in get_storage().iter_files(category, user_id):
+                if self.assets.find(category, name, user_id=user_id) is not None:
                     continue
                 self.assets.create(
                     user_id,
@@ -154,9 +154,9 @@ class LibraryService:
             limit=limit,
             offset=offset,
         )
-        # 一次性列出目录做存在性判断，避免逐条 stat
+        # 一次性列出该用户目录做存在性判断，避免逐条 stat
         present = {
-            category: {name for name, _ in get_storage().iter_files(category)}
+            category: {name for name, _ in get_storage().iter_files(category, user_id)}
             for category in ("uploads", "generated")
         }
         return {
@@ -182,9 +182,12 @@ class LibraryService:
             return None
         return self._to_out(asset)
 
-    def display_name(self, category: str, stored_name: str) -> str | None:
-        """下载用的显示名：资料库里有记录就用它（重命名后下载得到新名），否则 None。"""
-        asset = self.assets.find(category, stored_name)
+    def display_name(self, category: str, stored_name: str, user_id: int | None = None) -> str | None:
+        """下载用的显示名：资料库里有记录就用它（重命名后下载得到新名），否则 None。
+
+        v0.7：传 user_id 只查该用户的记录（下载路由按请求者隔离）。
+        """
+        asset = self.assets.find(category, stored_name, user_id=user_id)
         return asset.filename if asset is not None else None
 
     def preview(self, asset_id: int, user_id: int) -> dict[str, Any] | None:
@@ -193,7 +196,7 @@ class LibraryService:
         if asset is None or asset.user_id != user_id:
             return None
         out = self._to_out(asset)
-        data = get_storage().read_bytes(asset.category, asset.stored_name, PREVIEW_TEXT_BYTES)
+        data = get_storage().read_bytes(asset.category, asset.stored_name, PREVIEW_TEXT_BYTES, user_id=asset.user_id)
         if data is None:
             return {**out, "preview": "missing"}
         if asset.kind == "image":
@@ -203,7 +206,9 @@ class LibraryService:
         if asset.kind == "video":
             return {**out, "preview": "video"}
         if asset.kind == "archive" and ft.suffix_of(asset.filename) == "zip":
-            entries = list_zip_entries(get_storage().read_bytes(asset.category, asset.stored_name) or b"")
+            entries = list_zip_entries(
+                get_storage().read_bytes(asset.category, asset.stored_name, user_id=asset.user_id) or b""
+            )
             return {
                 **out,
                 "preview": "archive",
@@ -261,7 +266,7 @@ class LibraryService:
         if asset is None or asset.user_id != user_id:
             return False
         if remove_file:
-            get_storage().remove(asset.category, asset.stored_name)
+            get_storage().remove(asset.category, asset.stored_name, asset.user_id)
         return self.assets.delete(asset_id)
 
     def bulk_delete(self, asset_ids: list[int], user_id: int, *, remove_file: bool = True) -> int:

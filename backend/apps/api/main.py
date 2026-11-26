@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -6,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from agent_platform.config import settings
 from apps.api.routes import (
+    admin,
     auth,
     chat,
     files,
@@ -20,7 +22,39 @@ from apps.api.routes import memories as memories_route
 from apps.api.routes import projects as projects_route
 from apps.api.routes import settings as settings_route
 
-app = FastAPI(title=settings.app_name, version="0.6.3")
+
+def _startup_maintenance() -> None:
+    """启动维护（v0.7，幂等）：local 模式补种 dev 用户；存量文件搬入 per-user 目录；
+    清理过期会话与验证码行。存储迁移失败只记日志不阻断启动（老布局在 local 下仍可读）。"""
+    import logging
+
+    from agent_platform.infrastructure.database.session import SessionLocal
+    from agent_platform.infrastructure.storage.migrate import (
+        migrate_root_files_to_user_dirs,
+    )
+    from agent_platform.repositories.users import UserRepository
+    from agent_platform.services import auth_service
+
+    logger = logging.getLogger("agent_platform.startup")
+    with SessionLocal() as db:
+        if settings.auth_mode == "local":
+            UserRepository(db).ensure_user(settings.dev_user_id, "developer")
+        auth_service.purge_expired(db)
+    try:
+        moved = migrate_root_files_to_user_dirs(settings.dev_user_id)
+        if moved:
+            logger.warning("v0.7 存量迁移：已把 %d 个根目录文件搬入 u%s/", moved, settings.dev_user_id)
+    except OSError:
+        logger.exception("存量文件目录迁移失败（可稍后手动执行 scripts/migrate_files_to_user_dirs.py）")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    _startup_maintenance()
+    yield
+
+
+app = FastAPI(title=settings.app_name, version="0.7.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,6 +76,7 @@ app.include_router(projects_route.router, prefix=settings.api_v1_prefix)
 app.include_router(memories_route.router, prefix=settings.api_v1_prefix)
 app.include_router(groups.router, prefix=settings.api_v1_prefix)
 app.include_router(search.router, prefix=settings.api_v1_prefix)
+app.include_router(admin.router, prefix=settings.api_v1_prefix)
 
 
 # 托管已构建的前端（frontend/dist），使 http://127.0.0.1:8000 直接打开页面。

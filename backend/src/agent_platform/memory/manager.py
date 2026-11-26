@@ -17,15 +17,22 @@ from agent_platform.repositories.conversations import ConversationRepository
 from agent_platform.repositories.memories import MemoryRepository
 from agent_platform.repositories.messages import MessageRepository
 from agent_platform.repositories.projects import ProjectRepository
-from agent_platform.services.settings_service import get_settings_service
+from agent_platform.services.settings_service import get_settings_service, user_settings_service
 
 
 class MemoryManager:
-    def __init__(self, db: Session, model=None, *, enabled: bool | None = None) -> None:
+    def __init__(
+        self, db: Session, model=None, user_id: int | None = None, *, enabled: bool | None = None
+    ) -> None:
         self.db = db
         self.model = model
         if enabled is None:
-            enabled = bool(get_settings_service().load().get("memory_enabled", True))
+            # v0.7：memory_enabled 按用户解析（cloud=user_settings 表；None → 共享文件，行为同 v0.6）
+            if user_id is None:
+                service = get_settings_service()
+            else:
+                service = user_settings_service(db, user_id)
+            enabled = bool(service.load().get("memory_enabled", True))
         self.enabled = enabled
         self.conversations = ConversationRepository(db)
         self.messages = MessageRepository(db)

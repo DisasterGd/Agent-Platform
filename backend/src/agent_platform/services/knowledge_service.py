@@ -23,7 +23,10 @@ from agent_platform.infrastructure.embeddings import embed_texts
 from agent_platform.repositories.file_assets import FileAssetRepository
 from agent_platform.repositories.knowledge import KnowledgeRepository
 from agent_platform.services.library_service import LibraryService
-from agent_platform.services.settings_service import get_settings_service
+from agent_platform.services.settings_service import (
+    get_settings_service,
+    user_settings_service,
+)
 
 CHUNK_TARGET = 900          # 目标块长（字符）
 CHUNK_MAX = 400             # 单文件块数上限
@@ -161,11 +164,20 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 class KnowledgeService:
-    def __init__(self, db: Session) -> None:
+    def __init__(
+        self, db: Session, user_id: int | None = None, settings_service=None
+    ) -> None:
         self.db = db
         self.assets = FileAssetRepository(db)
         self.chunks = KnowledgeRepository(db)
         self.library = LibraryService(db)
+        # v0.7：嵌入角色配置按用户解析（cloud=各用户各凭据；None → 共享文件，行为同 v0.6，测试可注入）
+        if settings_service is not None:
+            self._settings = settings_service
+        elif user_id is None:
+            self._settings = get_settings_service()
+        else:
+            self._settings = user_settings_service(db, user_id)
 
     # ---------- 索引 ----------
 
@@ -178,7 +190,7 @@ class KnowledgeService:
         asset = self.assets.get(asset_id)
         if asset is None:
             return None
-        text = extract_text(asset.category, asset.stored_name, asset.content_type)
+        text = extract_text(asset.category, asset.stored_name, asset.content_type, asset.user_id)
         if not text:
             return None
         n = self.chunks.replace_for_asset(asset, chunk_text(text))
@@ -225,7 +237,7 @@ class KnowledgeService:
 
     def _embedding_role(self) -> dict | None:
         """嵌入角色配置；未配置、无模型名或该供应商没 Key → None（关闭向量检索）。"""
-        cfg = get_settings_service().resolve_role("embedding")
+        cfg = self._settings.resolve_role("embedding")
         if not cfg or not str(cfg.get("api_key") or "").strip():
             return None
         return cfg

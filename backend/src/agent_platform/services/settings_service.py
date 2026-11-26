@@ -16,10 +16,14 @@
 - **profiles = 凭据**（每供应商各自的 Base URL 与 Key，互不覆写）；**roles = 分工**（谁干哪类活）。
   角色引用某个供应商的凭据即可跨厂商组合：推理用 DeepSeek、识图用百炼、生图用智谱——各用各的 Key；
 - 角色模型名解析优先级：role.model > 该供应商在 .env 的同名配置（仅 reasoning + 同供应商时）> 预设默认；
-- **API Key 经 DPAPI 加密落盘**（infrastructure/secret_store），HTTP 层只回 has_api_key 布尔、永不回显明文；
+- **API Key 经加密落盘**（infrastructure/secret_store：local=DPAPI / cloud=Fernet），HTTP 层只回 has_api_key 布尔、永不回显明文；
 - api_key 保存语义：None=保留原值，""=清除，非空=替换；roles 里出现哪个键就整体替换哪个角色（null=取消配置）；
 - v1（单配置）/v2（profiles 无 roles）旧文件在读取时自动派生 roles：reasoning 取当时的 active+model，
   vision 取 vision_model（空则 null），image_gen/embedding=null——行为与旧版本完全一致；下一次保存写成 v3。
+
+**v0.7 存储后端（SettingsStore 协议）**：local 模式=FileStore（data/settings.json 单文件，行为零变化）；
+cloud 模式=DbStore（user_settings 表按用户隔离，每人一份同构 JSON）。
+PRESETS/角色解析/保存语义完全复用，切换的只是"数据放哪"。
 前端设置页通过 /api/settings 读写这里的配置。
 """
 from __future__ import annotations
@@ -27,9 +31,13 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
+from typing import Protocol
+
+from sqlalchemy.orm import Session
 
 from agent_platform.config import settings
 from agent_platform.infrastructure import secret_store
+from agent_platform.repositories.user_settings import UserSettingsRepository
 
 # 内置国产模型预设（前端设置页展示 + 下拉候选）
 # models/vision_models/image_models/embedding_models 分别是四个角色的下拉候选；model 是 reasoning 的默认模型名。
@@ -124,14 +132,22 @@ def _merge_role(saved: object) -> dict | None:
     return {"provider": provider, "model": str(saved.get("model") or "").strip()}
 
 
-class SettingsService:
+class SettingsStore(Protocol):
+    """设置原始 JSON 的存取协议：local=FileStore / cloud=DbStore（结构完全同构）。"""
+
+    def read_raw(self) -> dict: ...
+
+    def write(self, data: dict) -> None: ...
+
+
+class FileStore:
+    """local 模式：data/settings.json 单文件（v0.5.2 起的原行为，零变化）。"""
+
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.Lock()
 
-    # ---------- 读取与迁移 ----------
-
-    def _read_raw(self) -> dict:
+    def read_raw(self) -> dict:
         if self.path.is_file():
             try:
                 loaded = json.loads(self.path.read_text(encoding="utf-8"))
@@ -140,6 +156,37 @@ class SettingsService:
             except (json.JSONDecodeError, OSError):
                 pass
         return {}
+
+    def write(self, data: dict) -> None:
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+class DbStore:
+    """cloud 模式：user_settings 表按用户一行一 JSON（repositories/user_settings 唯一访问）。"""
+
+    def __init__(self, db: Session, user_id: int) -> None:
+        self.repo = UserSettingsRepository(db)
+        self.user_id = user_id
+
+    def read_raw(self) -> dict:
+        return self.repo.read(self.user_id)
+
+    def write(self, data: dict) -> None:
+        self.repo.write(self.user_id, data)
+
+
+class SettingsService:
+    def __init__(self, source: SettingsStore | Path) -> None:
+        # 兼容旧调用：传路径 = FileStore（本地文件）；cloud 模式传 DbStore 实例
+        self.store: SettingsStore = FileStore(source) if isinstance(source, Path) else source
+        self._lock = threading.Lock()
+
+    # ---------- 读取与迁移 ----------
+
+    def _read_raw(self) -> dict:
+        return self.store.read_raw()
 
     def _migrate(self, raw: dict) -> dict:
         """统一规范成 v3 结构；v1/v2 旧文件在此透明升级（roles 自动派生，行为不变）。"""
@@ -181,14 +228,19 @@ class SettingsService:
     # ---------- 角色解析（核心） ----------
 
     def _profile_credentials(self, provider: str, data: dict) -> tuple[str, str]:
-        """该供应商凭据 (base_url, 明文 api_key)。.env 兜底只对 .env 那一家生效，绝不串 Key。"""
+        """该供应商凭据 (base_url, 明文 api_key)。.env 兜底只对 .env 那一家生效，绝不串 Key。
+
+        v0.7：.env Key 兜底**仅限 local 模式**（本地单用户的便利）；cloud 模式是 BYOK——
+        宿主机 .env 的 Key 绝不能当全体用户的兜底凭据（否则等于把平台 Key 送给每个用户）。
+        """
         profile = _merge_profile(data["profiles"].get(provider))
         preset = PRESETS.get(provider)
         base_url = profile["base_url"]
         api_key = secret_store.decrypt(profile["api_key"])
         if provider == settings.llm_provider:
             base_url = base_url or settings.llm_base_url
-            api_key = api_key or settings.llm_api_key
+            if settings.auth_mode == "local":
+                api_key = api_key or settings.llm_api_key
         elif preset:
             base_url = base_url or preset["base_url"]
         return base_url, api_key
@@ -308,16 +360,37 @@ class SettingsService:
                         data["roles"][role] = _merge_role(roles_payload[role])
             if payload.get("memory_enabled") is not None:
                 data["memory_enabled"] = bool(payload["memory_enabled"])
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            self.store.write(data)
         return self.public_config()
+
+
+_file_store_instance: FileStore | None = None
+
+
+def _file_store() -> FileStore:
+    """local 模式的共享文件后端（settings.json 单例，等价 v0.6 的进程级单例语义）。"""
+    global _file_store_instance
+    if _file_store_instance is None:
+        _file_store_instance = FileStore(Path(settings.storage_dir) / "settings.json")
+    return _file_store_instance
 
 
 _service: SettingsService | None = None
 
 
 def get_settings_service() -> SettingsService:
+    """本地模式全局单例（v0.6 起的行为，测试可替换 _service）。生产服务请用 user_settings_service。"""
     global _service
     if _service is None:
-        _service = SettingsService(Path(settings.storage_dir) / "settings.json")
+        _service = SettingsService(_file_store())
     return _service
+
+
+def user_settings_service(db: Session, user_id: int | None = None) -> SettingsService:
+    """按用户取设置服务：cloud=DbStore（user_settings 表按用户隔离）；
+    local=FileStore（全体共用 settings.json——本地单用户，行为与 v0.6 完全一致）。"""
+    if settings.auth_mode == "cloud":
+        if db is None:
+            raise ValueError("cloud 模式必须提供数据库会话")
+        return SettingsService(DbStore(db, int(user_id or settings.dev_user_id)))
+    return SettingsService(_file_store())

@@ -37,8 +37,11 @@ class FileAssetRepository:
         project_id: int | None = None,
         conversation_id: int | None = None,
     ) -> FileAsset:
-        """幂等登记：同一磁盘文件重复登记返回既有记录（扫描存量与工具并发都靠它兜底）。"""
-        existing = self.find(category, stored_name)
+        """幂等登记：同一磁盘文件重复登记返回既有记录（扫描存量与工具并发都靠它兜底）。
+
+        v0.7：唯一性按 (user_id, category, stored_name)——per-user 目录下同名文件互不冲突。
+        """
+        existing = self.find(category, stored_name, user_id=user_id)
         if existing is not None:
             return existing
         asset = FileAsset(
@@ -62,10 +65,13 @@ class FileAssetRepository:
     def get(self, asset_id: int) -> FileAsset | None:
         return self.db.get(FileAsset, asset_id)
 
-    def find(self, category: str, stored_name: str) -> FileAsset | None:
+    def find(self, category: str, stored_name: str, user_id: int | None = None) -> FileAsset | None:
+        """按磁盘名定位条目。传 user_id 限定该用户（v0.7 隔离）；None 保留旧语义（不筛用户）。"""
         stmt = select(FileAsset).where(
             FileAsset.category == category, FileAsset.stored_name == stored_name
         )
+        if user_id is not None:
+            stmt = stmt.where(FileAsset.user_id == user_id)
         return self.db.scalars(stmt).first()
 
     def _filtered(
@@ -198,13 +204,21 @@ class FileAssetRepository:
         self.db.refresh(asset)
         return asset
 
-    def link_uploads(self, stored_names: list[str], conversation_id: int, project_id: int | None) -> int:
-        """消息落库时把附件对应的上传记录归到该会话/项目（上传时还不知道会归属谁）。"""
+    def link_uploads(
+        self, stored_names: list[str], conversation_id: int, project_id: int | None,
+        user_id: int | None = None,
+    ) -> int:
+        """消息落库时把附件对应的上传记录归到该会话/项目（上传时还不知道会归属谁）。
+
+        v0.7：传 user_id 只归该用户自己的记录（会话归属即用户，跨用户同名互不误挂）。
+        """
         if not stored_names:
             return 0
         stmt = select(FileAsset).where(
             FileAsset.category == "uploads", FileAsset.stored_name.in_(stored_names)
         )
+        if user_id is not None:
+            stmt = stmt.where(FileAsset.user_id == user_id)
         rows = list(self.db.scalars(stmt))
         for asset in rows:
             asset.conversation_id = conversation_id

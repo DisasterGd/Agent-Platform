@@ -55,26 +55,29 @@ CREATE_ZIP_PARAMETERS: dict = {
 }
 
 
-def _resolve_reference(ref: str) -> tuple[str, bytes] | None:
-    """把模型给的 url 或文件名解析成 (包内路径, 字节内容)。"""
+def _resolve_reference(ref: str, user_id: int | None) -> tuple[str, bytes] | None:
+    """把模型给的 url 或文件名解析成 (包内路径, 字节内容)。只读当前用户目录内的文件。"""
     storage = get_storage()
     parsed = parse_file_url(ref)
     if parsed is not None:
         category, stored_name = parsed
-        data = storage.read_bytes(category, stored_name)
+        data = storage.read_bytes(category, stored_name, user_id=user_id)
         return (stored_name, data) if data is not None else None
     name = (ref or "").strip().replace("\\", "/").rsplit("/", 1)[-1]
     if not name:
         return None
     for category in ("generated", "uploads"):
-        data = storage.read_bytes(category, name)
+        data = storage.read_bytes(category, name, user_id=user_id)
         if data is not None:
             return name, data
     return None
 
 
 def create_zip(
-    filename: str, files: list[dict] | None = None, from_files: list[str] | None = None
+    filename: str,
+    files: list[dict] | None = None,
+    from_files: list[str] | None = None,
+    user_id: int | None = None,
 ) -> ToolResult:
     files = [f for f in (files or []) if isinstance(f, dict)][:MAX_INLINE_FILES]
     refs = [str(r) for r in (from_files or []) if str(r).strip()][:MAX_REFERENCES]
@@ -82,7 +85,7 @@ def create_zip(
     extras: list[tuple[str, bytes]] = []
     missing: list[str] = []
     for ref in refs:
-        found = _resolve_reference(ref)
+        found = _resolve_reference(ref, user_id)
         if found is None:
             missing.append(ref)
         else:
@@ -108,7 +111,7 @@ def create_zip(
             payload["missing"] = missing[:10]
         return ToolResult(content=json.dumps(payload, ensure_ascii=False))
 
-    stored = get_storage().save("generated", name, data, mime)
+    stored = get_storage().save("generated", name, data, mime, user_id=user_id)
     entries = [e["path"] for e in list_zip_entries(data)]
     artifact = {
         "filename": stored.stored_name,

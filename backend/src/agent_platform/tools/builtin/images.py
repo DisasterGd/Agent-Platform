@@ -1,13 +1,16 @@
 """generate_image 工具（v0.6 生图角色）。
 
-模型侧只描述“画什么”，用哪个供应商哪个模型由用户在「设置 → 模型角色 → 图像生成」里预先配置——
+模型侧只描述"画什么"，用哪个供应商哪个模型由用户在「设置 → 模型角色 → 图像生成」里预先配置——
 这正是角色化的意义：生图交给真正的多模态厂商，主模型负责理解需求与组织对话。
 
 与文本工具同规：纯函数、不碰数据库；产物放 ToolResult.artifacts，由服务层登记进资料库。
+生图配置（image_config）与用户归属（user_id）由服务层按轮注入：cloud 模式各用户读各自的
+生图角色与凭据，产物落进各自的文件目录；不注入时回退全局配置（本地模式/测试）。
 """
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
 from agent_platform.infrastructure.filetypes import classify_kind, human_size
 from agent_platform.infrastructure.imagegen import ImageGenError, generate_image
@@ -53,8 +56,14 @@ def _fail(error: str) -> ToolResult:
     return ToolResult(content=json.dumps({"ok": False, "error": error}, ensure_ascii=False))
 
 
-async def generate_image_tool(prompt: str, size: str = "1024x1024", name: str = "") -> ToolResult:
-    cfg = create_image_config()
+async def generate_image_tool(
+    prompt: str,
+    size: str = "1024x1024",
+    name: str = "",
+    user_id: int | None = None,
+    image_config: Callable[[], dict | None] | None = None,
+) -> ToolResult:
+    cfg = image_config() if image_config is not None else create_image_config()
     if cfg is None:
         return _fail("尚未配置生图角色：请在「设置 → 模型角色 → 图像生成」选择供应商与模型，并配好该供应商的 API Key")
     text = (prompt or "").strip()
@@ -71,7 +80,7 @@ async def generate_image_tool(prompt: str, size: str = "1024x1024", name: str = 
 
     safe_name = "".join(ch for ch in (name or "").strip() if ch.isalnum() or ch in "-_")[:40] or "生成图像"
     filename = f"{safe_name}.{_EXT_BY_MIME.get(content_type, 'png')}"
-    stored = get_storage().save("generated", filename, data, content_type)
+    stored = get_storage().save("generated", filename, data, content_type, user_id=user_id)
     artifact = {
         "filename": stored.stored_name,
         "stored_name": stored.stored_name,

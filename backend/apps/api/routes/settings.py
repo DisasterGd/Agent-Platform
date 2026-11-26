@@ -1,18 +1,22 @@
-"""设置接口：读取/保存按供应商隔离的模型配置，探测 OpenAI 兼容接口的可用模型。
+"""设置接口（v0.7 起按当前用户读写）：读取/保存按供应商隔离的模型配置，探测可用模型。
 
 安全约定：任何响应都不回显 API Key 明文，只回 has_api_key 布尔；
 保存时 api_key 字段缺省=保留、空串=清除、非空=替换。
+local 模式仍读写共享的 settings.json（行为同 v0.6）；cloud 模式读写 user_settings 表——
+每个用户各配各的角色与 Key，互不可见（BYOK）。
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from agent_platform.infrastructure.model_discovery import (
     DiscoveryError,
     discover_models,
 )
-from agent_platform.services.settings_service import PRESETS, get_settings_service
+from agent_platform.services.settings_service import PRESETS, user_settings_service
+from apps.api.dependencies import get_current_user_id, get_db
 
 router = APIRouter(tags=["settings"])
 
@@ -39,8 +43,8 @@ class DiscoverIn(BaseModel):
     api_key: str = ""
 
 
-def _view() -> dict:
-    service = get_settings_service()
+def _view(user_id: int, db: Session) -> dict:
+    service = user_settings_service(db, user_id)
     return {
         "config": service.public_config(),
         "profiles": service.profiles_view(),
@@ -50,22 +54,33 @@ def _view() -> dict:
 
 
 @router.get("/settings")
-def get_settings() -> dict:
-    return _view()
+def get_settings(
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> dict:
+    return _view(user_id, db)
 
 
 @router.put("/settings")
-def update_settings(body: SettingsIn) -> dict:
-    get_settings_service().save(body.model_dump())
-    return _view()
+def update_settings(
+    body: SettingsIn,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> dict:
+    user_settings_service(db, user_id).save(body.model_dump())
+    return _view(user_id, db)
 
 
 @router.post("/settings/discover-models")
-async def post_discover_models(body: DiscoverIn) -> dict:
+async def post_discover_models(
+    body: DiscoverIn,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> dict:
     base_url = body.base_url.strip()
     api_key = body.api_key.strip()
     if not base_url or not api_key:
-        cfg = get_settings_service().load()  # 明文只在内存流转到探测函数
+        cfg = user_settings_service(db, user_id).load()  # 明文只在内存流转到探测函数
         base_url = base_url or str(cfg.get("base_url") or "")
         api_key = api_key or str(cfg.get("api_key") or "")
     try:

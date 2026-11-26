@@ -29,7 +29,12 @@ from agent_platform.repositories.messages import MessageRepository
 from agent_platform.repositories.projects import ProjectRepository
 from agent_platform.services.knowledge_service import KnowledgeService
 from agent_platform.services.library_service import LibraryService
-from agent_platform.services.settings_service import PRESETS, get_settings_service
+from agent_platform.services.settings_service import (
+    PRESETS,
+    SettingsService,
+    get_settings_service,
+    user_settings_service,
+)
 from agent_platform.tools.builtin.registry import build_default_registry
 from agent_platform.tools.registry import ToolRegistry
 
@@ -53,29 +58,37 @@ def provisional_title(content: str) -> str:
 
 
 class ChatService:
-    def __init__(self, db: Session) -> None:
+    def __init__(self, db: Session, user_id: int | None = None) -> None:
         self.db = db
+        # v0.7：请求者身份（local=None → 共享配置与文件根目录；cloud=按用户隔离配置与文件）
+        self.user_id = user_id
         self.conversations = ConversationRepository(db)
         self.messages = MessageRepository(db)
         # v0.4.1：会话移动（添加至项目/分组）时校验归属
         self.projects = ProjectRepository(db)
         self.groups = GroupRepository(db)
-        self.model = create_model()
+        self.model = create_model(db, user_id)
         self.tools: ToolRegistry = build_default_registry()
         # v0.4：会话压缩 + 长期记忆注入/提炼的统一入口
-        self.memory = MemoryManager(db, self.model)
+        self.memory = MemoryManager(db, self.model, user_id=user_id)
         # v0.5：生成文件登记进资料库（工具只产出 artifact 事件，落库在这里）
         self.library = LibraryService(db)
         # v0.6.1：知识库检索（工具按轮注入，闭包携带当轮归属）
-        self.knowledge = KnowledgeService(db)
+        self.knowledge = KnowledgeService(db, user_id=user_id)
         # v0.6 打磨：未配置识图角色、但主模型原生支持图像（在其供应商 vision_models 清单内）
         # → 附件图片以 data URI 直传主模型，而不是悄悄丢弃
         self.images_to_main = self._compute_direct_vision()
 
+    def _settings(self) -> SettingsService:
+        """该用户生效的设置（cloud=数据库按用户隔离；local=None → 共享文件，行为同 v0.6）。"""
+        if self.user_id is None:
+            return get_settings_service()
+        return user_settings_service(self.db, self.user_id)
+
     def _compute_direct_vision(self) -> bool:
         if self.model is None:
             return False
-        service = get_settings_service()
+        service = self._settings()
         if service.resolve_role("vision") is not None:
             return False
         reasoning = service.resolve_role("reasoning")
@@ -91,10 +104,18 @@ class ChatService:
     def list_conversations(self, user_id: int, project_id: object = ...) -> list[Conversation]:
         return self.conversations.list_by_user(user_id, project_id=project_id)
 
-    def get_conversation(self, conversation_id: int) -> Conversation | None:
-        return self.conversations.get(conversation_id)
+    def get_conversation(self, conversation_id: int, user_id: int | None = None) -> Conversation | None:
+        """取会话；传 user_id 时校验归属（不是本人的按不存在处理，避免暴露存在性）。"""
+        conversation = self.conversations.get(conversation_id)
+        if conversation is None:
+            return None
+        if user_id is not None and conversation.user_id != user_id:
+            return None
+        return conversation
 
-    def list_messages(self, conversation_id: int):
+    def list_messages(self, conversation_id: int, user_id: int | None = None):
+        if self.get_conversation(conversation_id, user_id) is None:
+            return None
         return self.messages.list_by_conversation(conversation_id)
 
     def rename_conversation(self, conversation_id: int, title: str) -> Conversation | None:
@@ -110,8 +131,15 @@ class ChatService:
         pinned: bool | None = None,
         project_id: object = UNSET,
         group_id: object = UNSET,
+        user_id: int | None = None,
     ) -> Conversation | None:
-        """会话编辑；project_id / group_id 只有显式传入（含 None=移出）才修改归属。"""
+        """会话编辑；project_id / group_id 只有显式传入（含 None=移出）才修改归属。
+
+        user_id 传入时校验归属（不是本人的会话一律 404 语义返回 None）。
+        """
+        conversation = self.get_conversation(conversation_id, user_id)
+        if conversation is None:
+            return None
         if title is not None:
             title = title.strip() or None
         conversation = self.conversations.update(conversation_id, title=title, pinned=pinned)
@@ -131,7 +159,10 @@ class ChatService:
             self.conversations.set_group(conversation_id, group_id)  # type: ignore[arg-type]
         return self.conversations.get(conversation_id)
 
-    def delete_conversation(self, conversation_id: int) -> bool:
+    def delete_conversation(self, conversation_id: int, user_id: int | None = None) -> bool:
+        """删除会话；user_id 传入时校验归属（不是本人的按不存在处理）。"""
+        if self.get_conversation(conversation_id, user_id) is None:
+            return False
         return self.conversations.delete(conversation_id)
 
     async def regenerate_reply(
@@ -184,7 +215,7 @@ class ChatService:
                 variant_index=self.messages.next_variant_index(group),
             )
 
-        enriched, direct_images = await self._enrich(content, attachments)
+        enriched, direct_images = await self._enrich(content, attachments, conversation.user_id)
         self.conversations.touch(conversation_id)
 
         # 上下文 = 此前各轮 + 本轮提问（合成一条未落库的最新 id 以免被摘要覆盖）；
@@ -232,12 +263,12 @@ class ChatService:
             title = provisional_title(content)
         self.conversations.update_title(conversation_id, title)
 
-    async def _describe_image(self, category: str, stored_name: str, content_type: str) -> str | None:
+    async def _describe_image(self, category: str, stored_name: str, content_type: str, user_id: int | None = None) -> str | None:
         """用视觉模型描述图片；未配置视觉模型时返回 None。"""
-        vision = create_vision_model()
+        vision = create_vision_model(self.db, user_id if user_id is not None else self.user_id)
         if vision is None:
             return None
-        data_uri = image_to_data_uri(category, stored_name, content_type)
+        data_uri = image_to_data_uri(category, stored_name, content_type, user_id)
         if data_uri is None:
             return None
         try:
@@ -247,10 +278,12 @@ class ChatService:
         except Exception:  # noqa: BLE001 — 识图失败不影响主流程
             return None
 
-    async def _enrich(self, content: str, attachments: list[dict]) -> tuple[str, list[ImagePart]]:
-        """把附件正文/识图结果拼进用户消息，供模型读取。
+    async def _enrich(
+        self, content: str, attachments: list[dict], user_id: int | None = None
+    ) -> tuple[str, list[ImagePart]]:
+        """把附件正文/识图结果拼进用户消息，供模型读取（只读该用户目录下的附件文件）。
 
-        返回 (增强正文, 直传主模型的图片)——后者仅在“未配置识图角色且主模型原生支持图像”时有内容。
+        返回 (增强正文, 直传主模型的图片)——后者仅在"未配置识图角色且主模型原生支持图像"时有内容。
         """
         parts: list[str] = [content]
         direct_images: list[ImagePart] = []
@@ -262,28 +295,40 @@ class ChatService:
             content_type = att.get("content_type", "")
             name = att.get("name", stored_name)
             if content_type.startswith("image/"):
-                description = await self._describe_image(category, stored_name, content_type)
+                description = await self._describe_image(category, stored_name, content_type, user_id)
                 if description:
                     parts.append(f"\n\n[图片 {name}]\n{description}")
                 elif self.images_to_main:
-                    data_uri = image_to_data_uri(category, stored_name, content_type)
+                    data_uri = image_to_data_uri(category, stored_name, content_type, user_id)
                     if data_uri:
                         direct_images.append(ImagePart(url=data_uri))
                         parts.append(f"\n\n[图片 {name}]\n（原图已附在本消息中，请直接观察）")
                 else:
                     parts.append(f"\n\n[图片 {name}]\n（未解析：未配置识图角色，且主模型不支持图像输入）")
             else:
-                text = extract_text(category, stored_name, content_type)
+                text = extract_text(category, stored_name, content_type, user_id)
                 if text:
                     parts.append(f"\n\n[附件 {name}]\n{text}")
         return "\n".join(parts), direct_images
 
     def _turn_tools(self, conversation: Conversation) -> ToolRegistry:
-        """当轮工具表：注入 search_knowledge——闭包携带会话归属/项目，工具层因此保持“不碰数据库”。"""
+        """当轮工具表：按会话归属注入用户上下文（文件落 per-user 目录、生图读本人角色）。
+
+        search_knowledge 闭包携带会话归属/项目，工具层因此保持"不碰数据库"。
+        """
         def search(query: str, project_only: bool) -> list[dict]:
             return self.knowledge.tool_search(conversation.user_id, conversation.project_id, query, project_only)
 
-        return build_default_registry(knowledge_search=search)
+        def image_config() -> dict | None:
+            from agent_platform.models.factory import create_image_config
+
+            return create_image_config(self.db, conversation.user_id)
+
+        return build_default_registry(
+            user_id=conversation.user_id,
+            knowledge_search=search,
+            image_config=image_config,
+        )
 
     @staticmethod
     def _attach_direct_images(context: list[ChatMessage], images: list[ImagePart]) -> None:
@@ -318,6 +363,7 @@ class ChatService:
         try:
             self.library.link_attachments(
                 attachments,
+                user_id=conversation.user_id,
                 conversation_id=conversation.id,
                 project_id=conversation.project_id,
             )
@@ -338,7 +384,7 @@ class ChatService:
         yield task_started()
 
         attachments = attachments or []
-        enriched, direct_images = await self._enrich(content, attachments)
+        enriched, direct_images = await self._enrich(content, attachments, conversation.user_id)
 
         # 落库保存原始内容 + 附件元数据，供前端展示与刷新后回显
         self.messages.add(conversation_id, "user", content, attachments=attachments)

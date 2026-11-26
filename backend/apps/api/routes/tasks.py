@@ -79,7 +79,7 @@ async def create_task(
 ):
     if not body.goal.strip():
         raise HTTPException(status_code=400, detail="任务目标不能为空")
-    return await TaskService(db).create_task(user_id, body.goal, body.conversation_id, body.project_id)
+    return await TaskService(db, user_id).create_task(user_id, body.goal, body.conversation_id, body.project_id)
 
 
 @router.get("/tasks", response_model=list[TaskOut])
@@ -89,7 +89,7 @@ def list_tasks(
     db: Session = Depends(get_db),
 ):
     """缺省返回该用户全部任务（v0.4.1 任务界面）；带 conversation_id 时只看该会话。"""
-    service = TaskService(db)
+    service = TaskService(db, user_id)
     if conversation_id is not None:
         return service.list_by_conversation(conversation_id, user_id)
     return service.list_all(user_id)
@@ -101,7 +101,7 @@ def get_task(
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    return _get_owned_task(TaskService(db), task_id, user_id)
+    return _get_owned_task(TaskService(db, user_id), task_id, user_id)
 
 
 @router.put("/tasks/{task_id}/steps", response_model=TaskOut)
@@ -111,7 +111,7 @@ def revise_task(
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    service = TaskService(db)
+    service = TaskService(db, user_id)
     _get_owned_task(service, task_id, user_id)
     task = service.revise(task_id, user_id, [s.model_dump() for s in body.steps])
     if task is None:
@@ -125,7 +125,7 @@ def cancel_task(
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    service = TaskService(db)
+    service = TaskService(db, user_id)
     _get_owned_task(service, task_id, user_id)
     return service.cancel(task_id, user_id)
 
@@ -137,7 +137,7 @@ def delete_task(
     db: Session = Depends(get_db),
 ):
     """删除任务记录（不影响已产生的会话）。"""
-    if not TaskService(db).delete(task_id, user_id):
+    if not TaskService(db, user_id).delete(task_id, user_id):
         raise HTTPException(status_code=404, detail="任务不存在")
 
 
@@ -147,7 +147,7 @@ async def execute_task(
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    service = TaskService(db)
+    service = TaskService(db, user_id)
     _get_owned_task(service, task_id, user_id)
 
     async def event_stream() -> AsyncIterator[str]:

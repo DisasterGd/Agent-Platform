@@ -28,9 +28,9 @@ GENERATE_FILE_PARAMETERS = {
 }
 
 
-def generate_file(format: str, title: str, content: str) -> ToolResult:
+def generate_file(format: str, title: str, content: str, user_id: int | None = None) -> ToolResult:
     filename, content_type, data = DocumentGenerator().generate(format, title, content)
-    stored = get_storage().save("generated", filename, data, content_type)
+    stored = get_storage().save("generated", filename, data, content_type, user_id=user_id)
     # 显示名 = 磁盘真实名 = 下载链接名（重名时带 “ (2)” 序号），方便直接在 data/generated 里翻阅
     artifact = {
         "filename": stored.stored_name,

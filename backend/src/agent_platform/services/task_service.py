@@ -34,15 +34,17 @@ EXECUTABLE_STATUSES = ("awaiting_approval", "failed")
 
 
 class TaskService:
-    def __init__(self, db: Session) -> None:
+    def __init__(self, db: Session, user_id: int | None = None) -> None:
         self.db = db
+        # v0.7：请求者身份（cloud 模式按用户隔离模型角色与文件目录）
+        self.user_id = user_id
         self.tasks = TaskRepository(db)
         self.conversations = ConversationRepository(db)
         self.messages = MessageRepository(db)
-        self.model = create_model()
+        self.model = create_model(db, user_id)
         self.tools = build_default_registry()
         self.planner = Planner(self.model)
-        self.chat = ChatService(db)
+        self.chat = ChatService(db, user_id)
 
     async def create_task(
         self,
@@ -128,15 +130,28 @@ class TaskService:
         self.conversations.touch(conversation.id)
         yield plan_created(steps, conversation.id)
 
-        # v0.4：任务执行器同样注入全局/项目记忆
-        memory_block = MemoryManager(self.db, self.model).memory_block(task.user_id, task.project_id)
+        # v0.4：任务执行器同样注入全局/项目记忆（memory_enabled 按任务归属者解析）
+        memory_block = MemoryManager(self.db, self.model, task.user_id).memory_block(task.user_id, task.project_id)
         # v0.6.1：本轮任务工具表注入 search_knowledge（携带任务归属/项目，工具层不碰库）
-        knowledge = KnowledgeService(self.db)
+        knowledge = KnowledgeService(self.db, user_id=task.user_id)
 
         def knowledge_search(query: str, project_only: bool) -> list[dict]:
             return knowledge.tool_search(task.user_id, task.project_id, query, project_only)
 
-        runner = Runner(self.model, tools=build_default_registry(knowledge_search=knowledge_search))
+        def image_config() -> dict | None:
+            from agent_platform.models.factory import create_image_config
+
+            return create_image_config(self.db, task.user_id)
+
+        runner = Runner(
+            self.model,
+            tools=build_default_registry(
+                user_id=task.user_id,
+                knowledge_search=knowledge_search,
+                image_config=image_config,
+            ),
+            user_id=task.user_id,
+        )
         try:
             async for event in runner.run(task.goal, steps, memory_block):
                 # 取消检查：任何时刻把状态改为 cancelled 都会在下一个事件生效

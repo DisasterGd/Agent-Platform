@@ -98,6 +98,7 @@ def create_conversation(
 def update_conversation(
     conversation_id: int,
     body: UpdateConversationIn,
+    user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     # 只有请求里显式出现的 project_id / group_id 才会改归属（null=移出）
@@ -107,8 +108,8 @@ def update_conversation(
     if "group_id" in body.model_fields_set:
         move_kwargs["group_id"] = body.group_id
     try:
-        conversation = ChatService(db).update_conversation(
-            conversation_id, body.title, body.pinned, **move_kwargs
+        conversation = ChatService(db, user_id).update_conversation(
+            conversation_id, body.title, body.pinned, user_id=user_id, **move_kwargs
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -120,24 +121,34 @@ def update_conversation(
 @router.delete("/conversations/{conversation_id}", status_code=204)
 def delete_conversation(
     conversation_id: int,
+    user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    if not ChatService(db).delete_conversation(conversation_id):
+    if not ChatService(db, user_id).delete_conversation(conversation_id, user_id):
         raise HTTPException(status_code=404, detail="会话不存在")
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=list[MessageOut])
-def list_messages(conversation_id: int, db: Session = Depends(get_db)):
-    service = ChatService(db)
-    if service.get_conversation(conversation_id) is None:
+def list_messages(
+    conversation_id: int,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    service = ChatService(db, user_id)
+    if service.get_conversation(conversation_id, user_id) is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     return service.list_messages(conversation_id)
 
 
 @router.post("/chat/stream")
-async def stream_chat(body: ChatStreamIn, db: Session = Depends(get_db)):
-    service = ChatService(db)
-    if service.get_conversation(body.conversation_id) is None:
+async def stream_chat(
+    body: ChatStreamIn,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """SSE 对话流：进流前先校验会话归属（v0.7 隔离收口——这是审计里最要紧的一个漏点）。"""
+    service = ChatService(db, user_id)
+    if service.get_conversation(body.conversation_id, user_id) is None:
         raise HTTPException(status_code=404, detail="会话不存在")
 
     async def event_stream() -> AsyncIterator[str]:
@@ -156,9 +167,13 @@ async def stream_chat(body: ChatStreamIn, db: Session = Depends(get_db)):
 
 
 @router.post("/chat/regenerate")
-async def regenerate_chat(body: RegenerateIn, db: Session = Depends(get_db)):
-    service = ChatService(db)
-    if service.get_conversation(body.conversation_id) is None:
+async def regenerate_chat(
+    body: RegenerateIn,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    service = ChatService(db, user_id)
+    if service.get_conversation(body.conversation_id, user_id) is None:
         raise HTTPException(status_code=404, detail="会话不存在")
 
     async def event_stream() -> AsyncIterator[str]:

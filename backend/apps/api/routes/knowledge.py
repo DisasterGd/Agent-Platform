@@ -18,7 +18,7 @@ def search_knowledge(
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> dict:
-    result = KnowledgeService(db).search(user_id, q.strip(), project_id=project_id, limit=limit)
+    result = KnowledgeService(db, user_id).search(user_id, q.strip(), project_id=project_id, limit=limit)
     if not result["terms"]:
         raise HTTPException(status_code=400, detail="检索词无效：请至少包含一个字母、数字或汉字")
     return result
@@ -30,4 +30,4 @@ def reindex(
     db: Session = Depends(get_db),
 ) -> dict:
     """给还没切块的上传文件补索引（已切过的不重切）；失败文件计入 scanned 而不计入 indexed。"""
-    return KnowledgeService(db).reindex_missing(user_id)
+    return KnowledgeService(db, user_id).reindex_missing(user_id)

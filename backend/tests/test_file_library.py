@@ -249,6 +249,7 @@ def test_link_attachments_assigns_ownership_after_sending(
 
     library.link_attachments(
         [{"name": "spec.md", "url": stored.url, "content_type": "text/markdown"}],
+        user_id=uid,
         conversation_id=42,
         project_id=mine.id,
     )
@@ -277,8 +278,13 @@ def test_scan_registers_existing_files_without_records(
 ) -> None:
     session, uid = db
     library = LibraryService(session)
-    (storage.generated / "legacy.docx").write_bytes(b"binary")
-    (storage.uploads / "old.txt").write_text("旧的txt", encoding="utf-8")
+    # v0.7 起扫描的是 per-user 目录：直接往 u{uid}/ 里放两个表里没有的文件
+    gen_dir = storage.user_dir("generated", uid)
+    up_dir = storage.user_dir("uploads", uid)
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    up_dir.mkdir(parents=True, exist_ok=True)
+    (gen_dir / "legacy.docx").write_bytes(b"binary")
+    (up_dir / "old.txt").write_text("旧的txt", encoding="utf-8")
 
     assert library.scan_existing(uid) == 2
     assert library.scan_existing(uid) == 0                   # 幂等：第二次不重复登记

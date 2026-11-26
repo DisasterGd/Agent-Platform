@@ -39,12 +39,13 @@ WRITE_FILE_PARAMETERS: dict = {
 }
 
 
-def write_file(filename: str, content: str) -> ToolResult:
+def write_file(filename: str, content: str, user_id: int | None = None) -> ToolResult:
+    """user_id 由服务层按会话归属注入（build_default_registry），落进 per-user 目录；直调（测试）落根目录。"""
     try:
         name, mime, data = build_text_file(filename, content)
     except ValueError as exc:
         return ToolResult(content=json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
-    stored = get_storage().save("generated", name, data, mime)
+    stored = get_storage().save("generated", name, data, mime, user_id=user_id)
     artifact = {
         "filename": stored.stored_name,
         "stored_name": stored.stored_name,
