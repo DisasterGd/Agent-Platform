@@ -15,6 +15,8 @@ from agent_platform.config import settings
 
 
 class SMTPProvider:
+    channel = "smtp"
+
     def __init__(
         self,
         host: str | None = None,

@@ -9,7 +9,6 @@
   30 天滑动续期。cookie 名固定 ap_session。
 
 防滥用（auth_codes 计数即可，不引入限流依赖）：每邮箱 1 次/分钟、5 次/小时、10 次/天；每 IP 20 次/天。
-注册邀请码：.env 配了 INVITE_CODE 时，新邮箱建号必须带对邀请码（登录老账号不受影响）。
 """
 from __future__ import annotations
 
@@ -98,7 +97,7 @@ def request_code(db: Session, email: str, ip: str = "") -> None:
         logging.getLogger("agent_platform.auth").exception("验证码邮件发送失败（to=%s）", email)
 
 
-def verify_code(db: Session, email: str, code: str, invite_code: str = "", ip: str = "") -> tuple[User, str]:
+def verify_code(db: Session, email: str, code: str, ip: str = "") -> tuple[User, str]:
     """校验验证码并签发会话。返回 (user, 明文 token)；邮箱未注册且验证通过即注册（登录注册合一）。"""
     email = normalize_email(email)
     cleaned_code = (code or "").strip()
@@ -125,16 +124,12 @@ def verify_code(db: Session, email: str, code: str, invite_code: str = "", ip: s
     user = users.get_by_email(email)
     if user is None and settings.auth_mode == "local":
         # 本地模式首次登录：把邮箱绑定到本地默认账号（而非建新号）——
-        # 已有的全部数据保留原归属，此后通过登录即可随时取回；绑定不需要邀请码。
+        # 已有的全部数据保留原归属，此后通过登录即可随时取回。
         dev_user = users.get(settings.dev_user_id)
         if dev_user is not None and not dev_user.email:
             users.bind_email(dev_user.id, email, email.split("@", 1)[0])
             user = dev_user
     if user is None:
-        # 注册环节：.env 配了邀请码则必须正确（决策点 #2）
-        expected = (settings.invite_code or "").strip()
-        if expected and (invite_code or "").strip() != expected:
-            raise AuthError("邀请码错误：首次注册需要有效的邀请码")
         local_part = email.split("@", 1)[0][:80]
         username = email[:80]
         if users.get_by_username(username) is not None:

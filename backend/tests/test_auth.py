@@ -1,4 +1,4 @@
-"""v0.7 账号体系测试：验证码发码/验码/注册登录合一/频控/邀请码 + 会话签发/续期/撤销/停用踢下线。
+"""v0.7 账号体系测试：验证码发码/验码/注册登录合一/频控 + 会话签发/续期/撤销/停用踢下线。
 
 离线：sqlite 内存库；邮件用假 Provider 记录调用（真实验证码从假 Provider 捕获的正文里提取）。
 """
@@ -49,8 +49,8 @@ def _request(db: Session, email: str, outbox: list[dict], monkeypatch=None, ip: 
     return match.group(1)
 
 
-def _verify(db: Session, email: str, code: str, invite: str = "") -> tuple[User, str]:
-    return auth_service.verify_code(db, email, code, invite)
+def _verify(db: Session, email: str, code: str) -> tuple[User, str]:
+    return auth_service.verify_code(db, email, code)
 
 
 # ---------- 发码 ----------
@@ -138,27 +138,18 @@ def test_verify_expired_code_rejected(db: Session, outbox: list[dict]) -> None:
         _verify(db, email, code)
 
 
-def test_verify_login_register_unified_and_invite_code(
-    db: Session, outbox: list[dict], monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_verify_login_register_unified(db: Session, outbox: list[dict], monkeypatch: pytest.MonkeyPatch) -> None:
+    """登录注册合一：同一邮箱验证码即凭证；新邮箱验证通过直接建号，无需其它任何信息。"""
     _relax_per_minute(monkeypatch)
-    email = "invited@example.com"
-    # 老用户先注册成功（无邀请码时开放注册）
+    email = "unified@example.com"
     code = _request(db, email, outbox)
     user, _ = _verify(db, email, code)
-    # 再配邀请码：老用户登录不受影响
-    monkeypatch.setattr(settings, "invite_code", "FRIEND-42")
     code2 = _request(db, email, outbox)
     user2, _ = _verify(db, email, code2)
-    assert user2.id == user.id
-    # 新邮箱没带邀请码 → 拒绝
-    with pytest.raises(AuthError, match="邀请码"):
-        code3 = _request(db, "stranger@example.com", outbox)
-        _verify(db, "stranger@example.com", code3)
-    # 带对邀请码 → 注册成功
-    code4 = _request(db, "friend@example.com", outbox)
-    user4, _ = _verify(db, "friend@example.com", code4, invite="FRIEND-42")
-    assert user4.email == "friend@example.com"
+    assert user2.id == user.id  # 第二次验证 = 登录老账号
+    code3 = _request(db, "another@example.com", outbox)
+    user3, _ = _verify(db, "another@example.com", code3)
+    assert user3.email == "another@example.com"  # 新邮箱 = 注册新号
 
 
 def test_admin_email_becomes_admin(db: Session, outbox: list[dict], monkeypatch: pytest.MonkeyPatch) -> None:

@@ -3,7 +3,8 @@
  * - LoginView：cloud 模式未登录时的全屏登录页；
  * - LoginForm：可复用表单本体，设置弹窗「账号管理」页签也用它（v0.7.2 起 local 模式可随时登录）。
  *
- * 防枚举由服务端保证（发码统一 204），本页只如实转述服务端错误（频控/验证码错等）。
+ * 防枚举由服务端保证（响应不含邮箱存在性），本页只如实转述服务端错误（频控/验证码错等）；
+ * 发码响应带 channel（console/smtp），据此提示验证码去向——console 通道即"码在后端控制台"。
  */
 import { useEffect, useRef, useState } from "react";
 import { authApi, type MeInfo } from "../services/auth";
@@ -21,7 +22,6 @@ export function LoginForm({
   const [step, setStep] = useState<"email" | "code">("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
-  const [invite, setInvite] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
@@ -40,10 +40,12 @@ export function LoginForm({
     if (!value) { setError("请输入邮箱"); return; }
     setBusy(true); setError(""); setNote("");
     try {
-      await authApi.requestCode(value);
+      const { channel } = await authApi.requestCode(value);
       setStep("code");
       setCooldown(RESEND_SECONDS);
-      setNote("验证码已发送，请查收邮箱（10 分钟内有效）");
+      setNote(channel === "console"
+        ? "当前邮件通道为 console（未配置真实发信）：验证码已打印到后端控制台/日志，请在那里查看；配置 MAIL_PROVIDER=smtp 后验证码才会发送到邮箱。"
+        : "验证码已发送，请查收邮箱（10 分钟内有效）");
       window.setTimeout(() => document.getElementById("login-code")?.focus(), 0);
     } catch (e) {
       setError(e instanceof Error ? e.message : "验证码发送失败");
@@ -56,7 +58,7 @@ export function LoginForm({
     if (!code.trim()) { setError("请输入验证码"); return; }
     setBusy(true); setError("");
     try {
-      const me = await authApi.verify(email.trim(), code.trim(), invite.trim());
+      const me = await authApi.verify(email.trim(), code.trim());
       onSuccess(me);
     } catch (e) {
       setError(e instanceof Error ? e.message : "登录失败");
@@ -89,15 +91,6 @@ export function LoginForm({
             id="login-code" className="login-input login-code" type="text" inputMode="numeric"
             placeholder="6 位数字" maxLength={6} value={code} disabled={busy}
             onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
-            onKeyDown={e => { if (e.key === "Enter") void verify(); }}
-          />
-          <label className="login-label" htmlFor="login-invite">
-            邀请码 <em>（仅首次注册需要；没有可留空）</em>
-          </label>
-          <input
-            id="login-invite" className="login-input" type="text"
-            placeholder="如已配置邀请码请填写" value={invite} disabled={busy}
-            onChange={e => setInvite(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter") void verify(); }}
           />
           <button className="login-btn" disabled={busy || !code.trim()}

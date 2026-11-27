@@ -1,6 +1,7 @@
 """认证接口（v0.7）：邮箱验证码登录/注册合一 + 会话 cookie。
 
-- POST /auth/request-code：发码（统一 204，不区分邮箱是否存在——防枚举）
+- POST /auth/request-code：发码，返回 {channel: "console"|"smtp"}（不区分邮箱是否存在——防枚举；
+  channel 供前端如实提示验证码去向，console 通道即"码在后端控制台"）
 - POST /auth/verify：验码 + 建号（未注册过）+ 签发 ap_session cookie（HttpOnly + SameSite=Lax，cloud 加 Secure）
 - GET  /auth/me：当前身份（local 模式永远 200，前端据此决定是否渲染登录页）
 - POST /auth/logout：撤销会话行 + 清 cookie
@@ -45,24 +46,26 @@ class EmailIn(BaseModel):
 class VerifyIn(BaseModel):
     email: str
     code: str
-    invite_code: str = ""  # .env 配置了邀请码时，首次注册必填
 
 
-@router.post("/auth/request-code", status_code=204)
-def request_code(body: EmailIn, request: Request, db: Session = Depends(get_db)) -> Response:
+@router.post("/auth/request-code")
+def request_code(body: EmailIn, request: Request, db: Session = Depends(get_db)) -> dict:
+    """发码。响应只含邮件通道类型，不含邮箱存在性信息——防枚举语义不变。"""
     ip = request.client.host if request.client else ""
     try:
         auth_service.request_code(db, body.email, ip=ip)
     except auth_service.AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-    return Response(status_code=204)
+    from agent_platform.infrastructure.mail.factory import get_mail_provider
+
+    return {"channel": get_mail_provider().channel}
 
 
 @router.post("/auth/verify")
 def verify(body: VerifyIn, request: Request, response: Response, db: Session = Depends(get_db)) -> dict:
     ip = request.client.host if request.client else ""
     try:
-        user, token = auth_service.verify_code(db, body.email, body.code, body.invite_code, ip=ip)
+        user, token = auth_service.verify_code(db, body.email, body.code, ip=ip)
     except auth_service.AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     _set_session_cookie(response, token)

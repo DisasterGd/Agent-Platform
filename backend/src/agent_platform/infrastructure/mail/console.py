@@ -11,5 +11,7 @@ logger = logging.getLogger("agent_platform.mail")
 
 
 class ConsoleProvider:
+    channel = "console"
+
     def send(self, to: str, subject: str, text: str) -> None:
         logger.warning("[console-mail] to=%s subject=%s\n%s", to, subject, text)

@@ -40,9 +40,8 @@ class Settings(BaseSettings):
     # auth_mode: local（默认）=单用户免登录，行为与 v0.6 完全一致；
     #            cloud=邮箱验证码登录、按用户隔离数据/文件/设置——差异只在配置与认证，不在代码分叉。
     auth_mode: str = "local"
-    # cloud 模式：首个管理员邮箱（该邮箱注册时自动 is_admin=1）；注册邀请码（空=开放注册，配了则注册必填）
+    # cloud 模式：首个管理员邮箱（该邮箱注册时自动 is_admin=1）
     admin_email: str = ""
-    invite_code: str = ""
     # 登录会话有效期（天，滑动续期）；cookie 名固定为 ap_session
     session_ttl_days: int = 30
     # cloud 模式下加密用户 API Key 的服务密钥（Fernet 派生源；cloud 必配，local 不用——local 走 DPAPI）

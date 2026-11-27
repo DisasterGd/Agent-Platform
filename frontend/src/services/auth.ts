@@ -1,6 +1,11 @@
 /** v0.7 认证：邮箱验证码登录/注册合一 + 当前身份。 */
 import { request } from "./api";
 
+/** /auth/request-code 返回：channel=console 时验证码只打印在后端控制台（未配置真实发信）。 */
+export interface RequestCodeResult {
+  channel: "console" | "smtp";
+}
+
 /** /auth/me 返回：mode=local 时前端直接进入应用（永远看不到登录页）。 */
 export interface MeInfo {
   id: number;
@@ -14,17 +19,17 @@ export interface MeInfo {
 
 export const authApi = {
   me: () => request<MeInfo>("/api/auth/me"),
-  /** 发送登录/注册验证码（统一 204，不区分邮箱是否存在）。 */
+  /** 发送登录/注册验证码；返回邮件通道类型（不区分邮箱是否存在——防枚举）。 */
   requestCode: (email: string) =>
-    request<void>("/api/auth/request-code", {
+    request<RequestCodeResult>("/api/auth/request-code", {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
-  /** 验证并登录；邮箱未注册过即注册（可带邀请码）。 */
-  verify: (email: string, code: string, invite_code?: string) =>
+  /** 验证并登录；邮箱未注册过即注册（验证码即唯一凭证，无需密码）。 */
+  verify: (email: string, code: string) =>
     request<MeInfo>("/api/auth/verify", {
       method: "POST",
-      body: JSON.stringify({ email, code, invite_code: invite_code ?? "" }),
+      body: JSON.stringify({ email, code }),
     }),
   logout: () => request<void>("/api/auth/logout", { method: "POST" }),
 };
