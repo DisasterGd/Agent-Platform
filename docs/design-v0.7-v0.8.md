@@ -247,6 +247,7 @@ caddy        ← 唯一对外：80/443，自动 Let's Encrypt 证书；/api/*/st
 | 0.7.3 设置上云 + 前端 | SettingsStore 双后端 + secret_store Fernet（新增 cryptography）+ LoginView/账号区/401 处理 | cloud 模式两用户各自配各自的角色互不可见 |
 | 0.7.4 管理员 + 文档 | is_admin 三端点 + ADMIN_EMAIL 引导 + README/架构文档更新 | 停用用户立即踢下线 |
 | 0.8.1 Docker 化 | compose 三件套 + SSE 心跳 + 连接池/限流 + 本地 compose 演练 | `docker compose up` 一条命令起全套；locust 简单压测出数 |
+| 0.8.x 配置界面化（v0.7.3 新增，产品原则：可变配置一律前端界面化） | admin 邮件设置页：SMTP host/账号/授权码存配置存储（密码走 secret_store 加密、永不回显）+ 发送测试邮件；`mail/factory.py` 改从配置存储实时读取（现为 lru_cache 读 .env 单例）；`SEARCH_PROVIDER` 搜索源同批迁移；.env 只留启动级（DATABASE_URL/AUTH_MODE/SERVICE_SECRET/ADMIN_EMAIL） | 部署者在设置页填 SMTP 并测试发送成功，全程不改文件、不重启；非 admin 不可见 |
 | 0.8.2 上线 | Cloudflare Tunnel（或轻量服务器）+ 域名/HTTPS + 备份 cron + 拨测 | 朋友从外网真实注册使用一个周期 |
 
 ---
