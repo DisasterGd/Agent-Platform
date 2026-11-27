@@ -377,7 +377,9 @@
    日志看 `docker compose logs -f app`。
 4. 上线（0.8.2）：装 cloudflared → 创建 Tunnel → 指向 `http://localhost:80`；有域名时 `.env` 设
    `SITE_ADDRESS=你的域名`（Caddy 自动签发 HTTPS）。运维清单（备份/拨测/防火墙）见 `docs/design-v0.7-v0.8.md` §4.5。
-方案细节见 `docs/design-v0.7-v0.8.md`。
+方案细节见 `docs/design-v0.7-v0.8.md`；**手把手部署教程（装 Docker→彩排→Cloudflare Tunnel 两条路线→运维清单）见
+`docs/deploy-guide.md`**。压测：`deploy/locustfile.py`（文件头注释有完整用法；20 并发 30s 实测：全端点 0 失败，
+列表/建删会话 P50 12-14ms，SSE 流瓶颈在上游 LLM 限速——常规跑分不含流式，防真实费用）。
 
 ## 环境要求
 
