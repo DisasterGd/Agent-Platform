@@ -41,9 +41,15 @@ class MemoryManager:
         self.long_memory = LongTermMemory(model, MemoryRepository(db))
 
     async def build_messages(
-        self, conversation: Conversation, entries: list[tuple[int, str, str]]
+        self,
+        conversation: Conversation,
+        entries: list[tuple[int, str, str]],
+        extra_system: str = "",
     ) -> tuple[list[ChatMessage], list[Event]]:
-        """超长压缩 → 剔除已覆盖消息 → 注入全局/项目记忆 → 产出上下文与事件。"""
+        """超长压缩 → 剔除已覆盖消息 → 注入全局/项目记忆 → 产出上下文与事件。
+
+        extra_system：本地项目会话的项目说明（v0.7.6，由 Chat 服务按会话归属计算）。
+        """
         events: list[Event] = []
         compressed = await self.convo_memory.ensure_summary(conversation, entries)
         if compressed:
@@ -60,7 +66,8 @@ class MemoryManager:
                     project: Project | None = self.projects.get(conversation.project_id)
                     project_name = project.name if project else ""
                 memory_block = format_block(memories, project_name=project_name)
-        return build_context(pairs, summary=conversation.summary or "", memory_block=memory_block), events
+        return build_context(pairs, summary=conversation.summary or "", memory_block=memory_block,
+                             extra_system=extra_system), events
 
     async def after_turn(self, conversation: Conversation, user_text: str, reply: str) -> list[Event]:
         """轮次结束后的记忆提炼（关闭自动记忆/无模型/空回复时静默跳过）。"""

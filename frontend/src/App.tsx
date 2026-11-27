@@ -16,6 +16,7 @@ import GlobalTip from "./components/GlobalTip";
 import Sidebar, { type ListFilter } from "./components/Sidebar";
 import SearchModal from "./components/SearchModal";
 import ProjectsModal from "./components/ProjectsModal";
+import LocalEditorModal from "./components/LocalEditorModal";
 import LibraryModal from "./components/LibraryModal";
 import TaskWorkspace from "./components/TaskWorkspace";
 import type { Artifact, Attachment, Conversation, Message, Project, LocalProject, StreamEvent, Task, ConvGroup, TaskHit } from "./types/chat";
@@ -148,6 +149,8 @@ function Workbench({ me }: { me: MeInfo }) {
   const [projects, setProjects] = useState<Project[]>([]);
   // v0.7.4 本地项目（仅 local 模式有数据；cloud 下接口 404，恒为空数组）
   const [localProjects, setLocalProjects] = useState<LocalProject[]>([]);
+  // v0.7.5 伪编辑器：当前打开的本地项目
+  const [localEditor, setLocalEditor] = useState<LocalProject | null>(null);
   const [groups, setGroups] = useState<ConvGroup[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
@@ -1102,6 +1105,7 @@ function Workbench({ me }: { me: MeInfo }) {
         onLocalCreated={addLocalProject}
         onLocalToggle={p => void toggleLocalWrite(p)}
         onLocalDelete={p => void removeLocalProject(p)}
+        onOpenLocal={lp => setLocalEditor(lp)}
         onClose={() => setProjectsOpen(false)}
         onCreate={name => void createProject(name)}
         onRename={(id, name) => void renameProject(id, name)}
@@ -1109,6 +1113,13 @@ function Workbench({ me }: { me: MeInfo }) {
         onDelete={p => void removeProject(p)}
         onPick={id => setListFilter({ kind: "project", id })}
       />
+    )}
+    {localEditor && (
+      <LocalEditorModal project={localEditor} onClose={() => setLocalEditor(null)}
+        onProjectChange={next => {
+          setLocalEditor(cur => (cur?.id === next.id ? next : cur));
+          setLocalProjects(cur => cur.map(x => (x.id === next.id ? next : x)));
+        }} />
     )}
     {libraryOpen && (
       <LibraryModal

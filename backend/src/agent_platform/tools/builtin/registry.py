@@ -3,12 +3,15 @@
 按轮注入上下文（沿用 search_knowledge 的闭包模式，工具层保持"不碰数据库"）：
 - user_id：会话/任务归属 → 文件类产物落进 per-user 目录（v0.7）；
 - knowledge_search：携带 user/project 的知识库检索闭包（v0.6.1）；
-- image_config：按用户解析生图角色（cloud 模式各用户各凭据，v0.7）。
+- image_config：按用户解析生图角色（cloud 模式各用户各凭据，v0.7）；
+- local_root / local_write：本地项目会话注入 local_list_dir/local_read_file（写入还须 allow_write，
+  v0.7.6）——root 只来自服务层校验过的注册行，模型给不出 root。
 """
 from __future__ import annotations
 
 from collections.abc import Callable
 from functools import partial
+from pathlib import Path
 
 from agent_platform.tools.builtin.archive import (
     CREATE_ZIP_DESCRIPTION,
@@ -35,6 +38,17 @@ from agent_platform.tools.builtin.knowledge_search import (
     SEARCH_KNOWLEDGE_PARAMETERS,
     build_search_knowledge,
 )
+from agent_platform.tools.builtin.local_fs import (
+    LOCAL_LIST_DESCRIPTION,
+    LOCAL_LIST_PARAMETERS,
+    LOCAL_READ_DESCRIPTION,
+    LOCAL_READ_PARAMETERS,
+    LOCAL_WRITE_DESCRIPTION,
+    LOCAL_WRITE_PARAMETERS,
+    local_list_dir,
+    local_read_file,
+    local_write_file,
+)
 from agent_platform.tools.builtin.search import (
     WEB_SEARCH_DESCRIPTION,
     WEB_SEARCH_PARAMETERS,
@@ -53,6 +67,8 @@ def build_default_registry(
     user_id: int | None = None,
     knowledge_search: Callable[[str, bool], list[dict]] | None = None,
     image_config: Callable[[], dict | None] | None = None,
+    local_root: Path | None = None,
+    local_write: bool = False,
 ) -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(
@@ -85,4 +101,19 @@ def build_default_registry(
             "search_knowledge", SEARCH_KNOWLEDGE_DESCRIPTION, SEARCH_KNOWLEDGE_PARAMETERS,
             build_search_knowledge(knowledge_search),
         )
+    # v0.7.6：本地项目（真实目录）——root 由服务层注入；写工具只在项目 allow_write 时存在
+    if local_root is not None:
+        registry.register(
+            "local_list_dir", LOCAL_LIST_DESCRIPTION, LOCAL_LIST_PARAMETERS,
+            partial(local_list_dir, root=local_root),
+        )
+        registry.register(
+            "local_read_file", LOCAL_READ_DESCRIPTION, LOCAL_READ_PARAMETERS,
+            partial(local_read_file, root=local_root),
+        )
+        if local_write:
+            registry.register(
+                "local_write_file", LOCAL_WRITE_DESCRIPTION, LOCAL_WRITE_PARAMETERS,
+                partial(local_write_file, root=local_root),
+            )
     return registry

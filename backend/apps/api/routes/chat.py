@@ -21,6 +21,8 @@ class ConversationOut(BaseModel):
     title: str
     pinned: bool
     project_id: int | None = None
+    # v0.7.4 本地项目归属：与 project_id 互斥（仅 local 模式会有值）
+    local_project_id: int | None = None
     group_id: int | None = None
     # v0.4.1 默认分组归类：task=任务模式相关会话（由任务表派生），chat=普通会话
     kind: str = "chat"
@@ -31,6 +33,7 @@ class ConversationOut(BaseModel):
 class CreateConversationIn(BaseModel):
     title: str = "新会话"
     project_id: int | None = None  # v0.4：归属项目（None = 未分组）
+    local_project_id: int | None = None  # v0.7.6：归属本地项目（与 project_id 互斥）
 
 
 class UpdateConversationIn(BaseModel):
@@ -91,7 +94,10 @@ def create_conversation(
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    return ChatService(db).create_conversation(user_id, body.title, body.project_id)
+    try:
+        return ChatService(db).create_conversation(user_id, body.title, body.project_id, body.local_project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.patch("/conversations/{conversation_id}", response_model=ConversationOut)

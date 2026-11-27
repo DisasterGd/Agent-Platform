@@ -10,6 +10,8 @@ interface Props {
   onLocalCreated?: (p: LocalProject) => void;
   onLocalToggle?: (p: LocalProject) => void;
   onLocalDelete?: (p: LocalProject) => void;
+  /** v0.7.5 点开本地项目 → 伪编辑器。 */
+  onOpenLocal?: (p: LocalProject) => void;
   onClose: () => void;
   onCreate: (name: string) => void;
   onRename: (id: number, name: string) => void;
@@ -31,7 +33,7 @@ function relTime(iso: string): string {
 }
 
 export default function ProjectsModal(props: Props) {
-  const { projects, conversations, localProjects, onLocalCreated, onLocalToggle, onLocalDelete,
+  const { projects, conversations, localProjects, onLocalCreated, onLocalToggle, onLocalDelete, onOpenLocal,
     onClose, onCreate, onRename, onPin, onDelete, onPick } = props;
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState("");
@@ -152,10 +154,11 @@ export default function ProjectsModal(props: Props) {
             <ul className="proj-local-list">
               {localProjects.map(lp => (
                 <li key={lp.id} className="lp-row">
-                  <div className="lp-info">
+                  <button type="button" className="lp-open" data-tip="打开伪编辑器（只读预览）"
+                    onClick={() => { onOpenLocal?.(lp); onClose(); }}>
                     <span className="lp-title">{lp.title}</span>
-                    <span className="lp-path" title={lp.root_path}>{lp.root_path}</span>
-                  </div>
+                    <span className="lp-path">{lp.root_path}</span>
+                  </button>
                   <label className="lp-switch" data-tip={lp.allow_write ? "允许 Agent 写入" : "只读：Agent 不能改文件"}>
                     <input type="checkbox" checked={lp.allow_write}
                       onChange={() => onLocalToggle?.(lp)} />

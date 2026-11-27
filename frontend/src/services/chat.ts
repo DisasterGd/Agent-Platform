@@ -69,10 +69,10 @@ export async function streamSSE(url: string, body: unknown, handlers: StreamHand
 export const chatApi = {
   listConversations: () => request<Conversation[]>("/api/conversations"),
 
-  createConversation: (title = "新会话", projectId: number | null = null) =>
+  createConversation: (title = "新会话", projectId: number | null = null, localProjectId?: number) =>
     request<Conversation>("/api/conversations", {
       method: "POST",
-      body: JSON.stringify({ title, project_id: projectId }),
+      body: JSON.stringify({ title, project_id: projectId, local_project_id: localProjectId ?? null }),
     }),
 
   /** 编辑会话；显式传 project_id / group_id（含 null=移出）才会改动归属。 */

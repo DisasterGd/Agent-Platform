@@ -27,14 +27,18 @@ def build_context(
     *,
     summary: str = "",
     memory_block: str = "",
+    extra_system: str = "",
 ) -> list[ChatMessage]:
     """把数据库中的 (role, content) 历史转换为发给模型的上下文。
 
     v0.4：
     - memory_block：注入到系统提示词末尾的全局/项目记忆；
     - summary：超长会话早期消息的自动压缩摘要，放在历史消息之前。
+    v0.7.6：extra_system——本地项目会话追加的项目说明（放在主提示词之后、记忆之前）。
     """
     system = SYSTEM_PROMPT
+    if extra_system:
+        system = f"{system}\n\n{extra_system}"
     if memory_block:
         system = f"{system}\n\n{MEMORY_HEADER}\n{memory_block}"
     messages = [ChatMessage(role="system", content=system)]

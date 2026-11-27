@@ -7,12 +7,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from agent_platform.config import settings
+from agent_platform.infrastructure.database.models import LocalProject
 from agent_platform.repositories.local_projects import LocalProjectRepository
 from agent_platform.services import local_project_service
 from agent_platform.services.local_project_service import LocalProjectError
@@ -26,6 +28,14 @@ def _require_local_mode() -> None:
 
 
 router = APIRouter(tags=["local-projects"], dependencies=[Depends(_require_local_mode)])
+
+
+def _get_owned(db: Session, user_id: int, project_id: int) -> LocalProject:
+    """归属校验统一入口：非本人/不存在一律 404（不暴露存在性）。"""
+    project = LocalProjectRepository(db).get_owned(project_id, user_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="本地项目不存在")
+    return project
 
 
 class LocalProjectOut(BaseModel):
@@ -81,11 +91,8 @@ def update_local_project(
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    repo = LocalProjectRepository(db)
-    project = repo.get_owned(project_id, user_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="本地项目不存在")
-    return repo.update(project, title=body.title, allow_write=body.allow_write)
+    project = _get_owned(db, user_id, project_id)
+    return LocalProjectRepository(db).update(project, title=body.title, allow_write=body.allow_write)
 
 
 @router.delete("/local-projects/{project_id}", status_code=204)
@@ -94,11 +101,38 @@ def delete_local_project(
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    repo = LocalProjectRepository(db)
-    project = repo.get_owned(project_id, user_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="本地项目不存在")
-    repo.delete(project)  # 只删注册行，磁盘文件不动
+    project = _get_owned(db, user_id, project_id)
+    LocalProjectRepository(db).delete(project)  # 只删注册行，磁盘文件不动
+
+
+@router.get("/local-projects/{project_id}/tree")
+def tree(
+    project_id: int,
+    path: str = ".",
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> dict:
+    """伪编辑器目录树：单层懒加载（前端点开目录才取下一层），归属+路径安全双校验。"""
+    project = _get_owned(db, user_id, project_id)
+    try:
+        return local_project_service.list_layer(Path(project.root_path), path)
+    except LocalProjectError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.get("/local-projects/{project_id}/file")
+def file_content(
+    project_id: int,
+    path: str,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> dict:
+    """伪编辑器文件内容：text/image/binary 三态（大小上限见 local_project_service）。"""
+    project = _get_owned(db, user_id, project_id)
+    try:
+        return local_project_service.read_file(Path(project.root_path), path)
+    except LocalProjectError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 @router.get("/local-projects/drives")

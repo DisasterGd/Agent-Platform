@@ -11,8 +11,16 @@ class ConversationRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def create(self, user_id: int, title: str = "新会话", project_id: int | None = None) -> Conversation:
-        conversation = Conversation(user_id=user_id, title=title, project_id=project_id)
+    def create(
+        self,
+        user_id: int,
+        title: str = "新会话",
+        project_id: int | None = None,
+        local_project_id: int | None = None,
+    ) -> Conversation:
+        conversation = Conversation(
+            user_id=user_id, title=title, project_id=project_id, local_project_id=local_project_id
+        )
         self.db.add(conversation)
         self.db.commit()
         self.db.refresh(conversation)

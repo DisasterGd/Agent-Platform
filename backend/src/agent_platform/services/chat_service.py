@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
@@ -19,12 +20,13 @@ from agent_platform.infrastructure.attachments import (
     image_to_data_uri,
     parse_file_url,
 )
-from agent_platform.infrastructure.database.models import Conversation
+from agent_platform.infrastructure.database.models import Conversation, LocalProject
 from agent_platform.memory.manager import MemoryManager
 from agent_platform.models.base import ChatMessage, ImagePart
 from agent_platform.models.factory import create_model, create_vision_model
 from agent_platform.repositories.conversations import ConversationRepository
 from agent_platform.repositories.groups import GroupRepository
+from agent_platform.repositories.local_projects import LocalProjectRepository
 from agent_platform.repositories.messages import MessageRepository
 from agent_platform.repositories.projects import ProjectRepository
 from agent_platform.services.knowledge_service import KnowledgeService
@@ -97,9 +99,19 @@ class ChatService:
         return reasoning["model"] in (PRESETS.get(reasoning["provider"], {}).get("vision_models") or [])
 
     def create_conversation(
-        self, user_id: int, title: str = "新会话", project_id: int | None = None
+        self,
+        user_id: int,
+        title: str = "新会话",
+        project_id: int | None = None,
+        local_project_id: int | None = None,
     ) -> Conversation:
-        return self.conversations.create(user_id, title, project_id)
+        """建会话；local_project_id（v0.7.6）与 project_id 互斥，归属需校验（防挂到别人的本地项目）。"""
+        if local_project_id is not None:
+            if project_id is not None:
+                raise ValueError("会话只能归属一个项目：工作项目与本地项目二选一")
+            if LocalProjectRepository(self.db).get_owned(int(local_project_id), user_id) is None:
+                raise ValueError("本地项目不存在")
+        return self.conversations.create(user_id, title, project_id, local_project_id=local_project_id)
 
     def list_conversations(self, user_id: int, project_id: object = ...) -> list[Conversation]:
         return self.conversations.list_by_user(user_id, project_id=project_id)
@@ -223,7 +235,11 @@ class ChatService:
         prior = [(m.id, m.role, m.content) for m in active[:pos]]
         next_id = max((m.id for m in active), default=0) + 1
         entries = prior + [(next_id, "user", enriched)]
-        context, ctx_events = await self.memory.build_messages(conversation, entries)
+        extra_system = ""
+        local = self._local_project(conversation)
+        if local is not None:
+            extra_system = self._local_project_prompt(local)
+        context, ctx_events = await self.memory.build_messages(conversation, entries, extra_system=extra_system)
         self._attach_direct_images(context, direct_images)
         for event in ctx_events:
             yield event
@@ -311,10 +327,31 @@ class ChatService:
                     parts.append(f"\n\n[附件 {name}]\n{text}")
         return "\n".join(parts), direct_images
 
-    def _turn_tools(self, conversation: Conversation) -> ToolRegistry:
+    def _local_project(self, conversation: Conversation) -> LocalProject | None:
+        """会话挂接的本地项目（v0.7.6）：归属不符（理论不可达，防御性）按不存在处理。"""
+        if conversation.local_project_id is None:
+            return None
+        return LocalProjectRepository(self.db).get_owned(conversation.local_project_id, conversation.user_id)
+
+    @staticmethod
+    def _local_project_prompt(project: LocalProject) -> str:
+        """本地项目会话的系统提示词段：告知根目录、路径约定与写入开关。"""
+        write_note = "开启：你可以创建/覆盖项目内的文本文件" if project.allow_write \
+            else "关闭（只读）：你没有写文件的工具，只能查看与分析代码"
+        return (
+            f"【本地项目】你正在本机的真实项目「{project.title}」内工作（目录 {project.root_path}）。\n"
+            "- 文件工具 local_list_dir / local_read_file / local_write_file 只作用于此项目根目录之内，"
+            "路径一律使用相对路径，越出项目根会被拒绝；\n"
+            f"- 该项目的写入开关：{write_note}；\n"
+            "- 你读写的是磁盘上的真实文件——写文件时给出完整内容，不要留占位符；"
+            "改动完成后提示用户在伪编辑器里刷新即可看到最新内容。"
+        )
+
+    def _turn_tools(self, conversation: Conversation, local_project: LocalProject | None = None) -> ToolRegistry:
         """当轮工具表：按会话归属注入用户上下文（文件落 per-user 目录、生图读本人角色）。
 
         search_knowledge 闭包携带会话归属/项目，工具层因此保持"不碰数据库"。
+        本地项目会话（v0.7.6）额外注入 local_* 三件套：root 只来自注册行；写工具须项目 allow_write。
         """
         def search(query: str, project_only: bool) -> list[dict]:
             return self.knowledge.tool_search(conversation.user_id, conversation.project_id, query, project_only)
@@ -324,10 +361,13 @@ class ChatService:
 
             return create_image_config(self.db, conversation.user_id)
 
+        local = local_project if local_project is not None else self._local_project(conversation)
         return build_default_registry(
             user_id=conversation.user_id,
             knowledge_search=search,
             image_config=image_config,
+            local_root=Path(local.root_path) if local is not None else None,
+            local_write=local.allow_write if local is not None else False,
         )
 
     @staticmethod
@@ -398,7 +438,11 @@ class ChatService:
         entries = [(m.id, m.role, m.content) for m in history]
         if entries and entries[-1][1] == "user":
             entries[-1] = (entries[-1][0], "user", enriched)
-        context, ctx_events = await self.memory.build_messages(conversation, entries)
+        extra_system = ""
+        local = self._local_project(conversation)
+        if local is not None:
+            extra_system = self._local_project_prompt(local)
+        context, ctx_events = await self.memory.build_messages(conversation, entries, extra_system=extra_system)
         self._attach_direct_images(context, direct_images)
         for event in ctx_events:
             yield event

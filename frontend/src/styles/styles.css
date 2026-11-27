@@ -902,6 +902,9 @@ button:not(:disabled):active{transform:scale(.97)}
 .lp-row{position:relative;display:flex;align-items:center;gap:10px;border:1px solid var(--line);
   border-radius:8px;padding:8px 10px;background:var(--paper-raised)}
 .lp-info{min-width:0;display:flex;flex-direction:column;gap:2px}
+.lp-open{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;text-align:left;border:none;
+  background:transparent;padding:0;color:inherit;cursor:pointer}
+.lp-open:hover .lp-title{color:var(--signal)}
 .lp-title{font-size:13px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lp-path{font-family:var(--mono);font-size:11px;color:var(--ink-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lp-switch{flex:none;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft);cursor:pointer}
@@ -923,3 +926,73 @@ button:not(:disabled):active{transform:scale(.97)}
 .fp-item-icon{color:var(--ink-faint);font-size:10px}
 .fp-naming{display:flex;flex-direction:column;gap:10px;max-width:420px}
 .fp-naming-actions{display:flex;align-items:center;justify-content:space-between;margin-top:6px}
+
+/* ===== v0.7.5 伪编辑器：三栏 shell + 懒加载树 + 文件查看 ===== */
+.editor-shell{width:min(1240px,94vw);height:min(800px,90vh);display:flex;flex-direction:column;overflow:hidden;
+  background:var(--paper-raised);border:1px solid var(--line-strong);border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,.35)}
+.editor-shell .modal-head{flex:none;display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.editor-root{font-family:var(--mono);font-size:11px;font-weight:400;color:var(--ink-faint);margin-left:10px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40vw}
+.editor-badge{flex:none;font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid var(--line-strong);color:var(--ink-soft);white-space:nowrap}
+.editor-body{flex:1;min-height:0;display:grid;grid-template-columns:250px 1fr 300px}
+/* 树 */
+.editor-tree{min-height:0;overflow:auto;border-right:1px solid var(--line);padding:8px 6px;background:var(--paper)}
+.editor-tree-item{display:flex;align-items:center;gap:6px;width:100%;padding:5px 8px;font-size:13px;text-align:left;
+  border:none;border-radius:6px;background:transparent;color:var(--ink);white-space:nowrap;overflow:hidden}
+.editor-tree-item:hover{background:var(--paper-deep)}
+.editor-tree-item.open{font-weight:600}
+.editor-tree-item.file.active{background:var(--paper-deep);color:var(--signal)}
+.editor-tree-icon{flex:none;color:var(--ink-faint);font-size:10px;width:10px}
+.editor-tree-size{margin-left:auto;font-size:10px;color:var(--ink-faint);font-style:normal;font-family:var(--mono)}
+/* 查看区 */
+.editor-view{min-height:0;overflow:auto;padding:16px 20px}
+.editor-file-head{font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin:0 0 12px;padding-bottom:8px;
+  border-bottom:1px dashed var(--line)}
+.editor-code{font-family:var(--mono);font-size:12.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:var(--ink)}
+.editor-img{max-width:100%;border:1px solid var(--line);border-radius:8px;background:#fff}
+.editor-note{font-size:13px;color:var(--ink-soft);border:1px dashed var(--line-strong);border-radius:8px;padding:12px 14px}
+.editor-hint{font-size:12px;color:var(--ink-faint);margin:4px 0}
+.editor-empty{display:flex;flex-direction:column;gap:8px;align-items:flex-start;padding-top:20px}
+/* 对话区占位（0.7.6 换 ChatPanel） */
+.editor-chat{min-height:0;overflow:auto;border-left:1px solid var(--line);padding:14px 16px;background:var(--paper)}
+
+/* ===== v0.7.6 本地项目对话区（伪编辑器右栏） ===== */
+.editor-chat{padding:0;display:flex;flex-direction:column}
+.lec-root{display:flex;flex-direction:column;min-height:0;flex:1}
+.lec-head{flex:none;display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line)}
+.lec-title{font-size:13px;font-weight:600;color:var(--ink)}
+.lec-head .lp-switch{margin-left:auto}
+.lec-new{flex:none;border:none;background:transparent;color:var(--ink-faint);font-size:12px;padding:2px 4px}
+.lec-new:hover{color:var(--signal)}
+.lec-history{flex:none;display:flex;flex-direction:column;padding:6px 8px;gap:2px;border-bottom:1px dashed var(--line)}
+.lec-conv{text-align:left;font-size:12px;color:var(--ink-soft);border:none;background:transparent;
+  border-radius:6px;padding:5px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lec-conv:hover{background:var(--paper-deep)}
+.lec-conv.active{color:var(--signal)}
+.lec-messages{flex:1;min-height:0;overflow-y:auto;padding:12px}
+.lec-messages .messages{display:flex;flex-direction:column;gap:12px}
+.lec-messages .message{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--paper-raised)}
+.lec-messages .message.user{background:var(--paper-deep)}
+.lec-messages .msg-meta{margin-bottom:4px}
+.lec-messages .user-text{margin:0;font-size:13px;white-space:pre-wrap;word-break:break-word}
+.lec-messages .markdown{font-size:12.5px}
+.lec-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.lec-chip{font-family:var(--mono);font-size:10.5px;padding:2px 8px;border-radius:999px;
+  border:1px solid var(--line-strong);color:var(--ink-soft);background:var(--paper)}
+.lec-chip.running{color:var(--signal);border-color:rgba(198,60,44,.35);animation:lec-pulse 1.2s ease-in-out infinite}
+@keyframes lec-pulse{50%{opacity:.45}}
+@media (prefers-reduced-motion: reduce){.lec-chip.running{animation:none}}
+.lec-input{flex:none;display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
+.lec-input textarea{flex:1;min-height:56px;max-height:140px;resize:vertical;font-size:13px;
+  font-family:var(--sans);border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px;
+  background:var(--paper-raised);color:var(--ink)}
+.lec-send{flex:none;align-self:flex-end;padding:8px 16px;font-size:13px;border:none;border-radius:8px;
+  background:var(--signal);color:#fff}
+.lec-send:disabled{opacity:.45}
+.lec-send:not(:disabled):hover{background:var(--signal-deep)}
+/* 窄屏：三栏纵向堆叠，树折叠为可滚动顶部区 */
+@media (max-width: 960px){
+  .editor-body{grid-template-columns:1fr;grid-template-rows:auto minmax(200px,1fr) auto;overflow:auto}
+  .editor-tree{max-height:180px;border-right:none;border-bottom:1px solid var(--line)}
+  .editor-chat{border-left:none;border-top:1px solid var(--line)}
+}

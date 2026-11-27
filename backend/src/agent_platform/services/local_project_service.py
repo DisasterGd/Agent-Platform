@@ -8,12 +8,19 @@
 """
 from __future__ import annotations
 
+import base64
 import string
 from pathlib import Path
+
+from agent_platform.infrastructure.filetypes import IMAGE_SUFFIXES, content_type_for, is_readable_text, suffix_of
 
 # 树与目录浏览共用的噪音目录（.gitignore 解析留后续，v0.7.4 固定清单）
 IGNORED_NAMES = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next", ".idea", ".vs"}
 MAX_BROWSE_ENTRIES = 500
+# v0.7.5 伪编辑器硬上限（设计文档 §2）
+MAX_TREE_ENTRIES = 500
+MAX_TEXT_BYTES = 512 * 1024          # 文本预览：超出只回元信息
+MAX_IMAGE_BYTES = 10 * 1024 * 1024   # 图片预览：超出按二进制只给元信息
 
 
 class LocalProjectError(Exception):
@@ -100,3 +107,67 @@ def browse(path: str) -> dict:
         raise LocalProjectError(f"目录不可读：{exc}") from exc
     parent = str(current.parent) if current.parent != current else ""
     return {"path": str(current), "parent": parent, "dirs": sorted(dirs, key=str.lower)}
+
+
+def list_layer(root: Path, rel: str = ".") -> dict:
+    """伪编辑器树的单层懒加载：目录在前、文件按名排，噪音目录不出现，单层限量防大仓库卡死。"""
+    directory = safe_resolve(root, rel)
+    if not directory.is_dir():
+        raise LocalProjectError("该路径不是目录")
+    entries: list[dict] = []
+    truncated = False
+    try:
+        for entry in directory.iterdir():
+            if entry.name in IGNORED_NAMES:
+                continue
+            if len(entries) >= MAX_TREE_ENTRIES:
+                truncated = True
+                break
+            try:
+                if entry.is_dir():
+                    entries.append({"name": entry.name, "type": "dir", "size": None})
+                elif entry.is_file():
+                    entries.append({"name": entry.name, "type": "file", "size": entry.stat().st_size})
+            except OSError:
+                continue  # 竞态删除/权限拒绝的条目跳过，不炸整层
+    except OSError as exc:
+        raise LocalProjectError(f"目录不可读：{exc}") from exc
+    entries.sort(key=lambda e: (e["type"] != "dir", e["name"].lower()))
+    return {"path": str(directory), "entries": entries, "truncated": truncated}
+
+
+def read_file(root: Path, rel: str) -> dict:
+    """伪编辑器文件内容：text（≤512KB 解码预览，超出只回元信息）/ image（≤10MB data URI）/ binary（只回元信息）。
+
+    类型判定只走 infrastructure/filetypes（IMAGE_SUFFIXES + is_readable_text），不在本处另写后缀表；
+    svg 虽是文本但按 image data URI 渲染（避免把 SVG 当 HTML 注入）。
+    """
+    target = safe_resolve(root, rel)
+    if not target.exists():
+        raise LocalProjectError("文件不存在", status_code=404)
+    if target.is_dir():
+        raise LocalProjectError("该路径是目录，请先展开查看")
+    name = target.name
+    try:
+        size = target.stat().st_size
+    except OSError as exc:
+        raise LocalProjectError(f"文件不可读：{exc}") from exc
+
+    if suffix_of(name) in IMAGE_SUFFIXES:
+        mime = content_type_for(name)
+        if size <= MAX_IMAGE_BYTES:
+            data = base64.b64encode(target.read_bytes()).decode("ascii")
+            return {"kind": "image", "mime": mime, "size": size,
+                    "content": f"data:{mime};base64,{data}", "truncated": False}
+        return {"kind": "binary", "mime": mime, "size": size, "content": None, "truncated": False}
+
+    if is_readable_text(name):
+        if size <= MAX_TEXT_BYTES:
+            raw = target.read_bytes()
+            return {"kind": "text", "mime": content_type_for(name), "size": size,
+                    "content": raw.decode("utf-8", errors="replace"), "truncated": False}
+        return {"kind": "text", "mime": content_type_for(name), "size": size,
+                "content": None, "truncated": True}
+
+    return {"kind": "binary", "mime": content_type_for(name), "size": size,
+            "content": None, "truncated": False}

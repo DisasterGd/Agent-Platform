@@ -174,3 +174,93 @@ def test_cloud_mode_hides_local_projects(client, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(settings, "auth_mode", "cloud")
     assert tc.get("/api/local-projects").status_code == 404
     assert tc.post("/api/local-projects", json={"root_path": "D:/x"}).status_code == 404
+
+
+# ---------- v0.7.5 伪编辑器：树 + 文件读取 ----------
+
+
+def _make_editor_tree(tmp_path):
+    """一个内容多样的演示项目：md/py/二进制/图片/超大文本/噪音目录。"""
+    import struct
+    import zlib
+
+    root = tmp_path / "editor-demo"
+    (root / "src").mkdir(parents=True)
+    (root / "node_modules").mkdir()  # 噪音
+    (root / "README.md").write_text("# 你好\n\n正文", encoding="utf-8")
+    (root / "src" / "app.py").write_text("print('hi')\n", encoding="utf-8")
+    (root / "blob.bin").write_bytes(bytes(range(256)) * 4)  # 无后缀二进制（NUL 多）
+    (root / "logo.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + struct.pack(">IIB", 1, 1, 8) + zlib.crc32(b"IHDR").to_bytes(4, "big")
+    )  # 不完整 PNG 无所谓——只验后缀与大小分支
+    (root / "big.log").write_text("x" * (513 * 1024), encoding="utf-8")  # 超大文本
+    return root
+
+
+def test_list_layer_dirs_first_and_ignores_noise(tmp_path) -> None:
+    root = _make_editor_tree(tmp_path)
+    layer = svc.list_layer(root, ".")
+    names = [e["name"] for e in layer["entries"]]
+    assert names[0] == "src"                       # 目录在前
+    assert "node_modules" not in names             # 噪音不出现
+    readme = next(e for e in layer["entries"] if e["name"] == "README.md")
+    assert readme["type"] == "file" and readme["size"] > 0
+    assert layer["truncated"] is False
+    nested = svc.list_layer(root, "src")
+    assert [e["name"] for e in nested["entries"]] == ["app.py"]
+    with pytest.raises(LocalProjectError, match="越出"):
+        svc.list_layer(root, "../../outside")
+    with pytest.raises(LocalProjectError, match="不是目录"):
+        svc.list_layer(root, "README.md")
+
+
+def test_read_file_text_and_truncation(tmp_path) -> None:
+    root = _make_editor_tree(tmp_path)
+    md = svc.read_file(root, "README.md")
+    assert md["kind"] == "text" and "你好" in md["content"] and md["mime"] == "text/markdown"
+    big = svc.read_file(root, "big.log")
+    assert big["kind"] == "text" and big["content"] is None and big["truncated"] is True
+    py = svc.read_file(root, str(root / "src" / "app.py"))  # root 内绝对路径也接受
+    assert py["kind"] == "text" and "print" in py["content"]
+
+
+def test_read_file_image_and_binary(tmp_path) -> None:
+    root = _make_editor_tree(tmp_path)
+    img = svc.read_file(root, "logo.png")
+    assert img["kind"] == "image" and img["content"].startswith("data:image/png;base64,")
+    blob = svc.read_file(root, "blob.bin")
+    assert blob["kind"] == "binary" and blob["content"] is None
+
+
+def test_read_file_rejects_missing_and_dir(tmp_path) -> None:
+    root = _make_editor_tree(tmp_path)
+    with pytest.raises(LocalProjectError, match="不存在"):
+        svc.read_file(root, "nope.md")
+    with pytest.raises(LocalProjectError, match="是目录"):
+        svc.read_file(root, "src")
+
+
+def test_tree_and_file_endpoints(client, tmp_path) -> None:
+    tc, ids, current = client
+    root = _make_editor_tree(tmp_path)
+    pid = tc.post("/api/local-projects", json={"root_path": str(root)}).json()["id"]
+
+    layer = tc.get(f"/api/local-projects/{pid}/tree")
+    assert layer.status_code == 200
+    assert "node_modules" not in [e["name"] for e in layer.json()["entries"]]
+
+    nested = tc.get(f"/api/local-projects/{pid}/tree", params={"path": "src"})
+    assert [e["name"] for e in nested.json()["entries"]] == ["app.py"]
+
+    md = tc.get(f"/api/local-projects/{pid}/file", params={"path": "README.md"})
+    assert md.status_code == 200 and md.json()["kind"] == "text"
+
+    missing = tc.get(f"/api/local-projects/{pid}/file", params={"path": "gone.txt"})
+    assert missing.status_code == 404
+    escape = tc.get(f"/api/local-projects/{pid}/tree", params={"path": "../../.."})
+    assert escape.status_code == 400
+
+    # 另一用户不可见
+    current["id"] = ids["b"]
+    assert tc.get(f"/api/local-projects/{pid}/tree").status_code == 404
+    assert tc.get(f"/api/local-projects/{pid}/file", params={"path": "README.md"}).status_code == 404

@@ -440,6 +440,10 @@ export default function Sidebar(props: Props) {
         )}
         {showProjTag && <span className="conv-tag" data-tip={projectName ?? ""}>{projectName}</span>}
         {!showProjTag && showTaskTag && <span className="conv-tag" data-tip="任务模式相关会话">任务</span>}
+        {/* v0.7.6 本地项目会话：轻量徽标提示归属（数据只在本机） */}
+        {c.local_project_id != null && (
+          <span className="conv-tag local" data-tip="本地项目的会话（在项目弹窗打开伪编辑器）">本地</span>
+        )}
         <button className="conv-title" data-tip={c.title}
           onClick={() => (selectMode ? toggleSelect(c.id) : onOpenConversation(c))}
           onDoubleClick={() => startEdit(c)}>
