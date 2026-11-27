@@ -5,6 +5,7 @@ import {
 } from "../services/settings";
 import type { MeInfo } from "../services/auth";
 import { LoginForm } from "./LoginView";
+import PlatformPanel from "./PlatformPanel";
 import MemoryPanel from "./MemoryPanel";
 import RoleCard from "./RoleCard";
 import SecretInput from "./SecretInput";
@@ -121,8 +122,8 @@ function AccountPanel({
 }
 
 export default function SettingsModal({ theme, onThemeChange, onClose, me, onLogout, onLoginSuccess }: Props) {
-  // v0.7.2：账号管理为第一个页签（默认打开）
-  const [tab, setTab] = useState<"account" | "model" | "memory">("account");
+  // v0.7.2：账号管理为第一个页签（默认打开）；v0.8.0 平台页签（部署者：local=本机用户 / cloud=admin）
+  const [tab, setTab] = useState<"account" | "model" | "memory" | "platform">("account");
   const [presets, setPresets] = useState<Record<string, Preset>>({});
   const [profiles, setProfiles] = useState<Record<string, ProfileView>>({});
   const [config, setConfig] = useState<ModelConfig | null>(null);
@@ -244,12 +245,16 @@ export default function SettingsModal({ theme, onThemeChange, onClose, me, onLog
           <button type="button" className={tab === "account" ? "on" : ""} onClick={() => setTab("account")}>账号</button>
           <button type="button" className={tab === "model" ? "on" : ""} onClick={() => setTab("model")}>模型</button>
           <button type="button" className={tab === "memory" ? "on" : ""} onClick={() => setTab("memory")}>记忆</button>
+          {(me?.mode !== "cloud" || me.is_admin) && (
+            <button type="button" className={tab === "platform" ? "on" : ""} onClick={() => setTab("platform")}>平台</button>
+          )}
         </div>
 
         <div className="modal-body">
           {tab === "account" ? (
             <AccountPanel me={me} onLogout={onLogout} onLoginSuccess={onLoginSuccess} />
-          ) : tab === "memory" ? <MemoryPanel /> : (<>
+          ) : tab === "platform" ? <PlatformPanel />
+          : tab === "memory" ? <MemoryPanel /> : (<>
           <section className="set-section">
             <h3>主题</h3>
             <div className="theme-toggle">

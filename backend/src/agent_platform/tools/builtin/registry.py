@@ -69,10 +69,12 @@ def build_default_registry(
     image_config: Callable[[], dict | None] | None = None,
     local_root: Path | None = None,
     local_write: bool = False,
+    search_factory: Callable[[], object] | None = None,
 ) -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(
-        "web_search", WEB_SEARCH_DESCRIPTION, WEB_SEARCH_PARAMETERS, web_search
+        "web_search", WEB_SEARCH_DESCRIPTION, WEB_SEARCH_PARAMETERS,
+        partial(web_search, provider_factory=search_factory),
     )
     registry.register(
         "fetch_url", FETCH_URL_DESCRIPTION, FETCH_URL_PARAMETERS, fetch_url

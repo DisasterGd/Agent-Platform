@@ -55,7 +55,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="0.7.6", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.8.1", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -64,6 +64,60 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class RateLimiter:
+    """全站 API 限流（v0.8.1）：内存滑动窗口按 IP 计数（与 auth 频控同款自写计数，零新依赖）。
+
+    只防单点刷爆（429），不是防滥用体系；进程内内存态——多实例时各自计数
+    （个人规模永远用不到多实例，见设计文档 4.3）。/api/health 拨测豁免。
+    """
+
+    def __init__(self, limit: int, window_seconds: float = 60.0) -> None:
+        import threading
+        from collections import deque
+
+        self._deque = deque
+        self._limit = max(limit, 0)
+        self._window = window_seconds
+        self._lock = threading.Lock()
+        self._hits: dict[str, deque[float]] = {}
+
+    def allow(self, key: str) -> bool:
+        if self._limit <= 0:
+            return True
+        import time
+
+        now = time.monotonic()
+        with self._lock:
+            hits = self._hits.setdefault(key, self._deque())
+            while hits and hits[0] <= now - self._window:
+                hits.popleft()
+            if len(hits) >= self._limit:
+                return False
+            hits.append(now)
+            if len(self._hits) > 10_000:  # 防长期膨胀：顺手清掉空壳 IP
+                for k in [k for k, v in self._hits.items() if not v]:
+                    self._hits.pop(k, None)
+            return True
+
+
+_limiter = RateLimiter(settings.rate_limit_per_minute)
+
+
+@app.middleware("http")
+async def api_rate_limit(request, call_next):
+    path = request.url.path
+    if (
+        path.startswith(f"{settings.api_v1_prefix}/")
+        and not path.startswith(f"{settings.api_v1_prefix}/health")
+    ):
+        client_ip = request.client.host if request.client else "unknown"
+        if not _limiter.allow(client_ip):
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse({"detail": "请求太频繁，请稍后再试"}, status_code=429)
+    return await call_next(request)
 
 app.include_router(health.router, prefix=settings.api_v1_prefix)
 app.include_router(settings_route.router, prefix=settings.api_v1_prefix)

@@ -33,16 +33,28 @@ class FallbackSearchProvider:
         raise SearchUnavailableError(detail)
 
 
-def create_search_provider() -> SearchProvider:
-    name = settings.search_provider.strip().lower()
+def create_search_provider(db=None) -> SearchProvider:
+    """按生效配置组装搜索源（v0.8.0）：传 Session 时 deployment_settings 逐字段覆盖、缺省回退 .env。
+
+    不传 db（防御/直调）按 .env 组装（旧行为）。tavily/bing 需要 API Key（界面或 .env 均可配置）。
+    """
+    if db is not None:
+        from agent_platform.services.platform_settings import effective_search_config
+
+        cfg = effective_search_config(db)
+        name, api_key = cfg["provider"], cfg["api_key"]
+    else:
+        name = settings.search_provider.strip().lower()
+        api_key = settings.search_api_key
+
     if name == "tavily":
-        if not settings.search_api_key:
-            raise SearchUnavailableError("使用 tavily 搜索需要配置 SEARCH_API_KEY")
-        return TavilySearchProvider(settings.search_api_key)
+        if not api_key:
+            raise SearchUnavailableError("使用 tavily 搜索需要配置搜索 API Key（设置 → 平台）")
+        return TavilySearchProvider(api_key)
     if name == "bing":
-        if not settings.search_api_key:
-            raise SearchUnavailableError("使用 bing 搜索需要配置 SEARCH_API_KEY")
-        return BingSearchProvider(settings.search_api_key)
+        if not api_key:
+            raise SearchUnavailableError("使用 bing 搜索需要配置搜索 API Key（设置 → 平台）")
+        return BingSearchProvider(api_key)
     if name == "bing_scrape":
         return BingHTMLSearchProvider()
     if name == "auto":

@@ -12,7 +12,12 @@ import base64
 import string
 from pathlib import Path
 
-from agent_platform.infrastructure.filetypes import IMAGE_SUFFIXES, content_type_for, is_readable_text, suffix_of
+from agent_platform.infrastructure.filetypes import (
+    IMAGE_SUFFIXES,
+    content_type_for,
+    is_readable_text,
+    suffix_of,
+)
 
 # 树与目录浏览共用的噪音目录（.gitignore 解析留后续，v0.7.4 固定清单）
 IGNORED_NAMES = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next", ".idea", ".vs"}

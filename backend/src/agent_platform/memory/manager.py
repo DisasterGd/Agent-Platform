@@ -17,7 +17,10 @@ from agent_platform.repositories.conversations import ConversationRepository
 from agent_platform.repositories.memories import MemoryRepository
 from agent_platform.repositories.messages import MessageRepository
 from agent_platform.repositories.projects import ProjectRepository
-from agent_platform.services.settings_service import get_settings_service, user_settings_service
+from agent_platform.services.settings_service import (
+    get_settings_service,
+    user_settings_service,
+)
 
 
 class MemoryManager:

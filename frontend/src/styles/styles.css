@@ -990,6 +990,17 @@ button:not(:disabled):active{transform:scale(.97)}
   background:var(--signal);color:#fff}
 .lec-send:disabled{opacity:.45}
 .lec-send:not(:disabled):hover{background:var(--signal-deep)}
+
+/* ===== v0.8.0 设置页「平台」页签（部署级配置：邮件通道 + 搜索源） ===== */
+.set-input{width:100%;max-width:420px;padding:8px 10px;font-size:13px;font-family:var(--sans);
+  border:1px solid var(--line-strong);border-radius:8px;background:var(--paper-raised);color:var(--ink)}
+.set-input:focus{outline:none;border-color:var(--signal)}
+select.set-input{appearance:auto}
+.pf-actions{margin-top:12px;display:flex;gap:10px}
+.pf-test{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)}
+.pf-test-row{display:flex;gap:8px;align-items:stretch}
+.pf-test-row .set-input{max-width:320px}
+.pf-test-row .login-btn{flex:none;align-self:auto}
 /* 窄屏：三栏纵向堆叠，树折叠为可滚动顶部区 */
 @media (max-width: 960px){
   .editor-body{grid-template-columns:1fr;grid-template-rows:auto minmax(200px,1fr) auto;overflow:auto}

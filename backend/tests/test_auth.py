@@ -37,7 +37,7 @@ def outbox(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
         def send(self, to: str, subject: str, text: str) -> None:
             sent.append({"to": to, "subject": subject, "text": text})
 
-    monkeypatch.setattr(mail_factory, "get_mail_provider", lambda: FakeProvider())
+    monkeypatch.setattr(mail_factory, "get_mail_provider", lambda *a, **k: FakeProvider())
     return sent
 
 

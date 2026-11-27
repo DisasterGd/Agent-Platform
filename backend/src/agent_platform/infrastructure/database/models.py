@@ -84,6 +84,20 @@ class UserSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class DeploymentSetting(Base):
+    """v0.8 部署级配置（配置界面化）：全站唯一的运行期可变配置，按 name 存 JSON。
+
+    与 UserSetting 的分界：那是"每用户"的（模型凭据/记忆开关），这是"每部署"的
+    （邮件通道、搜索源）——云端只有平台管理员可写，本地模式即本机用户。
+    敏感字段（SMTP 密码/搜索 Key）入库前经 secret_store 加密（按 auth_mode 选后端），
+    HTTP 响应永不回显。.env 仍是兜底：某字段未在库中配置时回退 .env 值。
+    """
+    __tablename__ = "deployment_settings"
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
     __table_args__ = (Index("ix_conversations_user_updated", "user_id", "updated_at"),)

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from agent_platform.core.events import to_sse
 from agent_platform.services.task_service import TaskService
 from apps.api.dependencies import get_current_user_id, get_db
+from apps.api.sse import with_heartbeat
 
 router = APIRouter(tags=["tasks"])
 
@@ -155,7 +156,7 @@ async def execute_task(
             yield to_sse(event)
 
     return StreamingResponse(
-        event_stream(),
+        with_heartbeat(event_stream()),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

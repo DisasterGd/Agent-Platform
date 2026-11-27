@@ -85,7 +85,7 @@ def request_code(db: Session, email: str, ip: str = "") -> None:
 
     from agent_platform.infrastructure.mail.factory import get_mail_provider
 
-    provider = get_mail_provider()
+    provider = get_mail_provider(db)
     body = (
         "你的 Agent Platform 登录验证码：\n\n"
         f"{code}\n\n"

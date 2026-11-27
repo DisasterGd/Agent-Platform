@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from agent_platform.config import settings
 from agent_platform.infrastructure.database.models import (
     Conversation,
     KnowledgeChunk,
@@ -21,7 +22,8 @@ from agent_platform.infrastructure.database.models import (
 )
 from agent_platform.infrastructure.storage.local import get_storage
 from agent_platform.repositories.users import UserRepository
-from agent_platform.services import auth_service
+from agent_platform.services import auth_service, platform_settings
+from agent_platform.services.platform_settings import PlatformConfigError
 from apps.api.dependencies import get_current_user_id, get_db
 
 router = APIRouter(tags=["admin"])
@@ -34,6 +36,19 @@ def require_admin(
     """非管理员一律 403（不暴露管理面存在与否的判断细节）。"""
     user = UserRepository(db).get(user_id)
     if user is None or not user.is_admin:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return user
+
+
+def require_platform_admin(
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> User:
+    """平台配置（v0.8.0）的写权限：local=本机用户即管理员（部署者本人）；cloud=必须 is_admin。"""
+    user = UserRepository(db).get(user_id)
+    if user is None:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    if settings.auth_mode != "local" and not user.is_admin:
         raise HTTPException(status_code=403, detail="需要管理员权限")
     return user
 
@@ -126,3 +141,86 @@ def stats(
         "knowledge_chunks": _count(KnowledgeChunk),
         "disk_usage": get_storage().usage(),
     }
+
+
+# ---------- v0.8.0 平台配置（配置界面化）：邮件通道 + 搜索源 ----------
+
+
+class MailConfigIn(BaseModel):
+    provider: str | None = None  # console | smtp
+    host: str | None = None
+    port: int | None = None
+    user: str | None = None
+    # 语义与模型 Key 一致：缺省（未传）=保留 / 空串=清除 / 非空=替换（secret_store 加密落库）
+    password: str | None = None
+    from_addr: str | None = None
+
+
+class MailTestIn(BaseModel):
+    to: str  # 测试收件邮箱（部署者自己的邮箱即可）
+
+
+class SearchConfigIn(BaseModel):
+    provider: str | None = None  # auto | duckduckgo | bing_scrape | bing | tavily
+    api_key: str | None = None   # 缺省=保留 / 空串=清除 / 非空=替换
+
+
+def _guard_config(fn):
+    try:
+        return fn()
+    except PlatformConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/admin/settings/mail")
+def get_mail_config(
+    _admin: User = Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """当前邮件配置视图（密码永不回显，只给 has_password 与组装完整性）。"""
+    return platform_settings.mail_config_view(db)
+
+
+@router.put("/admin/settings/mail")
+def put_mail_config(
+    body: MailConfigIn,
+    _admin: User = Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    return _guard_config(lambda: platform_settings.save_mail_config(db, body.model_dump()))
+
+
+@router.post("/admin/settings/mail/test")
+def test_mail_config(
+    body: MailTestIn,
+    _admin: User = Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """发送测试邮件。admin 接口如实回传错误（防枚举语义只属于验证码接口）——排障第一。"""
+    try:
+        auth_service.normalize_email(body.to)  # 收件地址格式校验（AuthError → 400）
+        platform_settings.send_test_mail(db, body.to.strip())
+    except auth_service.AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except PlatformConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"发送失败：{exc}") from exc
+    return {"ok": True, "message": f"测试邮件已发送到 {body.to.strip()}，请查收"}
+
+
+@router.get("/admin/settings/search")
+def get_search_config(
+    _admin: User = Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    return platform_settings.search_config_view(db)
+
+
+@router.put("/admin/settings/search")
+def put_search_config(
+    body: SearchConfigIn,
+    _admin: User = Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    return _guard_config(lambda: platform_settings.save_search_config(db, body.model_dump()))

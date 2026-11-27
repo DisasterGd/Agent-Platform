@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     # cloud 模式下加密用户 API Key 的服务密钥（Fernet 派生源；cloud 必配，local 不用——local 走 DPAPI）
     service_secret: str = ""
 
+    # ---- v0.8 部署加固 ----
+    # MySQL 连接池（按 uvicorn worker 数一起算：worker × (pool_size + max_overflow) ≤ MySQL max_connections）
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    # 全站 API 限流（每 IP 每分钟请求数；0=关闭。本地单用户 120 足够宽裕；上线防单点刷爆）
+    rate_limit_per_minute: int = 120
+
     # ---- 邮件（验证码通道，v0.7）----
     # mail_provider: console（默认，验证码打印到控制台/日志，本地调试 cloud 模式用）| smtp
     # smtp：QQ/163 邮箱授权码即可（smtp.qq.com:465 / smtp.163.com:465），零新依赖

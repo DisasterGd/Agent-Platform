@@ -1,7 +1,8 @@
-"""联网搜索工具。"""
+"""联网搜索工具（v0.8.0：搜索源配置走部署级存储，provider_factory 由服务层按会话注入）。"""
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
 from agent_platform.config import settings
 from agent_platform.infrastructure.search.factory import create_search_provider
@@ -20,8 +21,8 @@ WEB_SEARCH_PARAMETERS = {
 }
 
 
-async def web_search(query: str) -> ToolResult:
-    provider = create_search_provider()
+async def web_search(query: str, provider_factory: Callable | None = None) -> ToolResult:
+    provider = provider_factory() if provider_factory is not None else create_search_provider()
     try:
         results = await provider.search(query, max_results=settings.search_max_results)
     except Exception as exc:  # noqa: BLE001 — 网络不可达/被限流时优雅降级

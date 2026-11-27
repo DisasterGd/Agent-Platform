@@ -291,7 +291,7 @@ class ChatService:
             return await vision.complete(
                 [ChatMessage(role="user", content=VISION_PROMPT, images=[ImagePart(url=data_uri)])]
             )
-        except Exception:  # noqa: BLE001 — 识图失败不影响主流程
+        except Exception:  # noqa: BLE001
             return None
 
     async def _enrich(
@@ -361,11 +361,19 @@ class ChatService:
 
             return create_image_config(self.db, conversation.user_id)
 
+        def search_factory():
+            from agent_platform.infrastructure.search.factory import (
+                create_search_provider,
+            )
+
+            return create_search_provider(self.db)
+
         local = local_project if local_project is not None else self._local_project(conversation)
         return build_default_registry(
             user_id=conversation.user_id,
             knowledge_search=search,
             image_config=image_config,
+            search_factory=search_factory,
             local_root=Path(local.root_path) if local is not None else None,
             local_write=local.allow_write if local is not None else False,
         )
@@ -393,7 +401,7 @@ class ChatService:
                 project_id=conversation.project_id,
                 conversation_id=conversation.id,
             )
-        except Exception:  # noqa: BLE001,S110 — 资料库登记失败不影响聊天主流程
+        except Exception:  # noqa: BLE001
             pass
 
     def _link_attachments(self, conversation: Conversation, attachments: list[dict]) -> None:
@@ -407,7 +415,7 @@ class ChatService:
                 conversation_id=conversation.id,
                 project_id=conversation.project_id,
             )
-        except Exception:  # noqa: BLE001,S110 — 同上，登记失败不阻断发送
+        except Exception:  # noqa: BLE001
             pass
 
     async def stream_reply(

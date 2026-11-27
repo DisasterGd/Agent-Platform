@@ -3,6 +3,9 @@
 v0.2 扩展：
 - 支持图片（多模态）消息格式。
 - 支持工具调用（function calling），包括流式与工具调用交织的场景。
+v0.8 部署优化：AsyncOpenAI 客户端实例级复用——省掉每请求重建 HTTP 连接池/TLS 握手。
+同一 (base_url, api_key) 共用一个客户端（不同用户 Key 不同，天然隔离）；无锁——dict 读写
+在 GIL 下原子，竞态的最坏结果只是短暂多建一个客户端并被丢弃，无正确性影响。
 """
 from __future__ import annotations
 
@@ -12,14 +15,28 @@ from typing import Any
 
 from agent_platform.models.base import ChatMessage, ModelResponse, StreamEvent, ToolCall
 
+_clients: dict[tuple[str, str], Any] = {}
+_CLIENTS_MAX = 64
+
+
+def _get_client(base_url: str, api_key: str) -> Any:
+    from openai import AsyncOpenAI  # 延迟导入：仅在真正调用模型时才需要
+
+    key = (base_url, api_key)
+    client = _clients.get(key)
+    if client is None:
+        if len(_clients) >= _CLIENTS_MAX:
+            _clients.pop(next(iter(_clients)))
+        client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+        _clients[key] = client
+    return client
+
 
 class OpenAICompatibleModel:
     def __init__(self, base_url: str, api_key: str, model: str, temperature: float) -> None:
-        from openai import AsyncOpenAI  # 延迟导入：仅在真正调用模型时才需要
-
         self.model = model
         self.temperature = temperature
-        self.client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+        self.client = _get_client(base_url, api_key)
 
     def _to_openai_messages(self, messages: list[ChatMessage]) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []

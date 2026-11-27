@@ -143,12 +143,21 @@ class TaskService:
 
             return create_image_config(self.db, task.user_id)
 
+        # v0.8.0：搜索源走部署级配置（deployment_settings 逐字段覆盖、缺省回退 .env）
+        def search_factory():
+            from agent_platform.infrastructure.search.factory import (
+                create_search_provider,
+            )
+
+            return create_search_provider(self.db)
+
         runner = Runner(
             self.model,
             tools=build_default_registry(
                 user_id=task.user_id,
                 knowledge_search=knowledge_search,
                 image_config=image_config,
+                search_factory=search_factory,
             ),
             user_id=task.user_id,
         )

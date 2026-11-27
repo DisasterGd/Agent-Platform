@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from agent_platform.core.events import to_sse
 from agent_platform.services.chat_service import ChatService
 from apps.api.dependencies import get_current_user_id, get_db
+from apps.api.sse import with_heartbeat
 
 router = APIRouter(tags=["chat"])
 
@@ -158,6 +159,7 @@ async def stream_chat(
         raise HTTPException(status_code=404, detail="会话不存在")
 
     async def event_stream() -> AsyncIterator[str]:
+        # v0.8.1 心跳：30s 无事件时发注释帧，防中间层超时掐断/僵尸连接
         async for event in service.stream_reply(
             body.conversation_id,
             body.content,
@@ -166,7 +168,7 @@ async def stream_chat(
             yield to_sse(event)
 
     return StreamingResponse(
-        event_stream(),
+        with_heartbeat(event_stream()),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -187,7 +189,7 @@ async def regenerate_chat(
             yield to_sse(event)
 
     return StreamingResponse(
-        event_stream(),
+        with_heartbeat(event_stream()),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

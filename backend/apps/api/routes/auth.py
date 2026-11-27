@@ -58,7 +58,7 @@ def request_code(body: EmailIn, request: Request, db: Session = Depends(get_db))
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     from agent_platform.infrastructure.mail.factory import get_mail_provider
 
-    return {"channel": get_mail_provider().channel}
+    return {"channel": get_mail_provider(db).channel}
 
 
 @router.post("/auth/verify")
