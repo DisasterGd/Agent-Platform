@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { chatApi, type StreamHandlers } from "./services/chat";
 import { tasksApi } from "./services/tasks";
 import { projectsApi } from "./services/projects";
+import { localProjectsApi } from "./services/localProjects";
 import { groupsApi } from "./services/groups";
 import { settingsApi } from "./services/settings";
 import { authApi, type MeInfo } from "./services/auth";
@@ -17,7 +18,7 @@ import SearchModal from "./components/SearchModal";
 import ProjectsModal from "./components/ProjectsModal";
 import LibraryModal from "./components/LibraryModal";
 import TaskWorkspace from "./components/TaskWorkspace";
-import type { Artifact, Attachment, Conversation, Message, Project, StreamEvent, Task, ConvGroup, TaskHit } from "./types/chat";
+import type { Artifact, Attachment, Conversation, Message, Project, LocalProject, StreamEvent, Task, ConvGroup, TaskHit } from "./types/chat";
 
 type ViewMode = "chat" | "task";
 
@@ -145,6 +146,8 @@ function Workbench({ me }: { me: MeInfo }) {
   const [liveText, setLiveText] = useState("");
   const [planning, setPlanning] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
+  // v0.7.4 本地项目（仅 local 模式有数据；cloud 下接口 404，恒为空数组）
+  const [localProjects, setLocalProjects] = useState<LocalProject[]>([]);
   const [groups, setGroups] = useState<ConvGroup[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
@@ -189,16 +192,18 @@ function Workbench({ me }: { me: MeInfo }) {
   }, [mode]);
 
   const refresh = useCallback(async () => {
-    const [items, projs, grps, tks] = await Promise.all([
+    const [items, projs, grps, tks, lps] = await Promise.all([
       chatApi.listConversations(),
       projectsApi.list().catch(() => [] as Project[]),
       groupsApi.list().catch(() => [] as ConvGroup[]),
       tasksApi.list().catch(() => [] as Task[]),
+      localProjectsApi.list().catch(() => [] as LocalProject[]),
     ]);
     setConversations(items);
     setProjects(projs);
     setGroups(grps);
     setTasks(tks);
+    setLocalProjects(lps);
     return items;
   }, []);
 
@@ -305,6 +310,38 @@ function Workbench({ me }: { me: MeInfo }) {
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "删除项目失败");
+    }
+  }
+
+  // ---------- v0.7.4 本地项目（伪编辑器第一步：注册与管理） ----------
+
+  function addLocalProject(p: LocalProject) {
+    setLocalProjects(cur => [p, ...cur]);
+  }
+
+  async function toggleLocalWrite(p: LocalProject) {
+    try {
+      setError("");
+      const next = await localProjectsApi.update(p.id, { allow_write: !p.allow_write });
+      setLocalProjects(cur => cur.map(x => (x.id === next.id ? next : x)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "切换写入开关失败");
+    }
+  }
+
+  async function removeLocalProject(p: LocalProject) {
+    const ok = await askConfirm(
+      "移除本地项目",
+      `移除「${p.title}」的平台注册？磁盘目录 ${p.root_path} 与其中文件完全不受影响；关联会话会保留（脱离该项目）。`,
+      false,
+    );
+    if (!ok) return;
+    try {
+      setError("");
+      await localProjectsApi.remove(p.id);
+      setLocalProjects(cur => cur.filter(x => x.id !== p.id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "移除失败");
     }
   }
 
@@ -1061,6 +1098,10 @@ function Workbench({ me }: { me: MeInfo }) {
     {projectsOpen && (
       <ProjectsModal
         projects={projects} conversations={conversations}
+        localProjects={localProjects}
+        onLocalCreated={addLocalProject}
+        onLocalToggle={p => void toggleLocalWrite(p)}
+        onLocalDelete={p => void removeLocalProject(p)}
         onClose={() => setProjectsOpen(false)}
         onCreate={name => void createProject(name)}
         onRename={(id, name) => void renameProject(id, name)}

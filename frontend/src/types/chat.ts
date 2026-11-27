@@ -6,6 +6,8 @@ export interface Conversation {
   pinned: boolean;
   /** v0.4 项目归属：null = 未分组 */
   project_id?: number | null;
+  /** v0.7.4 本地项目归属：与 project_id 互斥 */
+  local_project_id?: number | null;
   /** v0.4.1 自定义分组归属：null = 按默认分组归类 */
   group_id?: number | null;
   /** v0.4.1 默认分组归类依据：task = 任务模式相关会话 */
@@ -31,6 +33,17 @@ export interface Project {
   name: string;
   description: string;
   pinned: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** v0.7.4 本地项目：机器上真实目录的注册记录（伪编辑器，仅 local 模式有此功能）。 */
+export interface LocalProject {
+  id: number;
+  title: string;
+  root_path: string;
+  /** 项目级写入开关：false = Agent 只读（0.7.6 起决定是否注入写工具） */
+  allow_write: boolean;
   created_at: string;
   updated_at: string;
 }
