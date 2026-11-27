@@ -1,0 +1,61 @@
+# Agent Platform 云端部署三件套（v0.8.1，设计文档 4.2）：caddy（唯一对外）→ app → mysql
+# 用法见 README「云端部署」小节；本地演练：docker compose up -d --build
+services:
+  app:
+    build: .
+    env_file: .env
+    environment:
+      # compose 内网固定指向 mysql 服务（覆盖 .env 里指向 127.0.0.1 的本地开发值）
+      DATABASE_URL: mysql+pymysql://agent_user:${MYSQL_PASSWORD:?请在 .env 配置 MYSQL_PASSWORD}@mysql:3306/agent_platform?charset=utf8mb4
+      # 上线开关（.env 里也应设 AUTH_MODE=cloud；这里双保险）
+      AUTH_MODE: ${AUTH_MODE:-cloud}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    expose:
+      - "8000"          # 仅 compose 内网可达，公网入口只有 caddy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_DATABASE: agent_platform
+      MYSQL_USER: agent_user
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 配置 MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 配置 MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    # 设计文档 4.2：数据库不对外暴露端口（仅 compose 内网可达）
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # 有域名时 .env 里设 SITE_ADDRESS=your.domain.com（Caddy 自动 Let's Encrypt）；本地演练默认 :80
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  caddy_data:
+  caddy_config:

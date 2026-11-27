@@ -1,0 +1,17 @@
+# 构建镜像只需要 frontend/ 与 backend/；其余一律不进镜像（.env 更不能进——凭据由 compose 注入）
+.git
+.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+data
+docs
+.env
+.env.*
+!.env.example
+frontend/node_modules
+frontend/dist
+backend/tests
+backend/scripts
+CLAUDE.md

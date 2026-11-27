@@ -1,0 +1,6 @@
+# Caddy 反代（v0.8.1）：SSE 长连接必须 flush_interval -1（关闭缓冲、立即下发），
+# 否则注释帧/事件帧会被攒包，登录页直接卡死在"正在检查登录状态"。
+{$SITE_ADDRESS}
+reverse_proxy app:8000 {
+	flush_interval -1
+}

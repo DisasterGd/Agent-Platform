@@ -1,4 +1,4 @@
-# Agent Platform v0.7.6
+# Agent Platform v0.8.1
 
 本地优先的智能 Agent 平台：React + TypeScript + Vite、FastAPI、MySQL、SQLAlchemy 2.x、Alembic、SSE，默认接入 DeepSeek（OpenAI 兼容接口）。
 
@@ -262,6 +262,35 @@
 - **前端**：新增登录页（邮箱 → 验证码两步卡片，仅 cloud 模式出现）；App 启动先调 `/auth/me`，
   任意请求 401 自动切回登录页；设置弹窗新增账号区（邮箱/管理员徽标/退出登录）；local 模式界面零变化
 
+**v0.8.1（部署加固：SSE 心跳 · 限流 · 连接池 · Docker 三件套交付物）**
+
+- **SSE 心跳**（设计文档 4.3 必做项）：三个流式端点（对话/重生成/任务执行）全部接入——30s 无事件时下发
+  SSE 注释帧（`: ping`），防 Caddy 等中间层掐断长连接、防半开僵尸连接占住 worker。实现用独立 pump 任务+队列：
+  绝不对事件流直接 `wait_for`（超时会把 CancelledError 注入正在等 LLM 的正常长轮询）；客户端断开语义、
+  事件源异常传播均与旧行为一致（10 个加固测试覆盖：心跳注入/异常重抛/断开取消）
+- **全站 API 限流**：内存滑动窗口按 IP 计数（与 auth 频控同款自写机制，零新依赖），默认 120 次/分钟
+  （`RATE_LIMIT_PER_MINUTE` 可调、0=关闭），`/api/health` 拨测豁免；本地单用户无感
+- **MySQL 连接池调参**：`DB_POOL_SIZE=10` / `DB_MAX_OVERFLOW=20`（.env 可覆盖，SQLite 自动跳过）；
+  **模型客户端复用**：AsyncOpenAI 客户端按 (base_url, api_key) 实例级缓存，省掉每请求重建连接池/TLS 握手
+- **Docker 交付物**（compose 三件套，设计文档 4.2）：`Dockerfile`（两阶段：node 构建前端 → python-slim
+  运行时，启动前自动 `alembic upgrade head`）、`docker-compose.yml`（caddy 唯一对外 + app 内网 + mysql
+  不暴露端口带健康检查）、`deploy/Caddyfile`（`flush_interval -1`——SSE 不缓冲）、`.dockerignore`
+- **本机未装 Docker Desktop**：交付物已就绪但 `docker compose up` 演练待装后执行（README「云端部署」有步骤）
+
+**v0.8.0（配置界面化：设置 → 平台页签，部署者不再手编 .env）**
+
+- **设置弹窗新增「平台」页签**（local=本机用户可见；cloud=仅 admin）：**邮件通道**（console/smtp、host/port/
+  发信账号/授权码/发件人 + **发送测试邮件**按钮）与**联网搜索源**（auto/duckduckgo/bing_scrape/bing/tavily + Key）。
+  呼应产品原则：可变配置一律前端界面化，`.env` 只留启动级
+- **部署级配置存储**：新表 `deployment_settings`（迁移 `0014`）按 name 存 JSON——SMTP 密码与搜索 Key
+  入库前经 `secret_store` 加密（local=DPAPI / cloud=Fernet），**HTTP 响应永不回显**；保存语义与模型 Key
+  一致（缺省=保留/空串=清除/非空=替换）；**每字段未配置时逐字段回退 .env**——不在界面填任何东西，行为与
+  v0.7 完全一致（零破坏迁移）
+- **实时生效**：`mail/factory.get_mail_provider(db)` 与 `create_search_provider(db)` 改为每次调用实时解析
+  （原 lru_cache 只读 .env 单例），界面改完无需重启；验证码发信、web_search 工具（经 provider_factory 按
+  会话注入）、任务执行全链路统一走该入口
+- 后端 18 个新测试（加密落库/回退/语义/门禁/工厂解析/心跳/限流/客户端复用）；浏览器验证平台页签全流程
+
 **v0.7.6（伪编辑器对话区：Agent 直接读写本地项目真实文件）**
 
 - **本地项目对话上线**（伪编辑器三步的收官）：伪编辑器右栏新增对话区——Agent 在会话里直接操作注册的真实
@@ -337,12 +366,17 @@
 - **资料库/项目弹窗固定尺寸**：不再随内容伸缩——固定 `min(680px, 88vh)` 高度，标题栏/页签/工具区钉住，
   文件列表在内容区**内部滚动**（文件多时不再撑高弹窗或溢出屏幕）；“项目”弹窗同款设计
 
-部署为多用户服务（cloud 模式）时：`.env` 设 `AUTH_MODE=cloud`、`SERVICE_SECRET=<随机长串>`、
-`ADMIN_EMAIL=<你的邮箱>` 与 `MAIL_PROVIDER=smtp` + SMTP 授权码——**cloud 上线必须配 SMTP，
-否则用户收不到验证码**（console 通道只打印在后端控制台，登录页也会如实提示）。
-QQ 邮箱三步：网页版设置 → 账号 → 开启「IMAP/SMTP 服务」→ 手机短信生成授权码（不是登录密码）→
-`SMTP_HOST=smtp.qq.com`、`SMTP_PORT=465`、`SMTP_USER/MAIL_FROM=你的QQ邮箱`、`SMTP_PASSWORD=授权码`
-（163 邮箱同理，`smtp.163.com:465`）。上线自检：用自己邮箱走一遍发码-登录，确认真实收到邮件。
+### 云端部署（v0.8：Docker 三件套 + Cloudflare Tunnel 零成本路线）
+
+1. `.env` 部署项：`AUTH_MODE=cloud`、`SERVICE_SECRET=<随机长串>`、`ADMIN_EMAIL=<你的邮箱>`、
+   `MYSQL_PASSWORD` / `MYSQL_ROOT_PASSWORD`（compose 容器用，与本地开发的 `DATABASE_URL` 互不相干）；
+   邮件通道与搜索源**在界面里配**：设置 → 平台（存库、立即生效，见 v0.8.0）。
+2. 安装 Docker Desktop（Windows：WSL2 后端），在仓库根目录执行 **`docker compose up -d --build`**——
+   caddy（对外 80/443）+ app（内网 8000，启动自动跑迁移）+ mysql（数据卷，不对公网）。
+3. 本地演练：浏览器开 `http://localhost`（caddy :80）；健康检查 `curl localhost/api/health`；
+   日志看 `docker compose logs -f app`。
+4. 上线（0.8.2）：装 cloudflared → 创建 Tunnel → 指向 `http://localhost:80`；有域名时 `.env` 设
+   `SITE_ADDRESS=你的域名`（Caddy 自动签发 HTTPS）。运维清单（备份/拨测/防火墙）见 `docs/design-v0.7-v0.8.md` §4.5。
 方案细节见 `docs/design-v0.7-v0.8.md`。
 
 ## 环境要求
