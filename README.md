@@ -1,4 +1,4 @@
-# Agent Platform v0.7.2
+# Agent Platform v0.7.3
 
 本地优先的智能 Agent 平台：React + TypeScript + Vite、FastAPI、MySQL、SQLAlchemy 2.x、Alembic、SSE，默认接入 DeepSeek（OpenAI 兼容接口）。
 
@@ -241,11 +241,12 @@
   `AUTH_MODE=cloud` 邮箱验证码登录、按用户隔离数据/文件/设置。`get_current_user_id()` 是全系统唯一身份来源
   （local=DEV_USER_ID；cloud=解析 `ap_session` cookie，未登录 401），全部路由经依赖注入、路由层零改动
 - **登录注册合一（无密码方案）**：`POST /auth/request-code` 发 6 位验证码（只存 SHA-256 哈希，10 分钟有效、错 5 次作废，
-  统一 204 不区分邮箱是否存在——防枚举）→ `POST /auth/verify` 验证即登录，邮箱没注册过就自动建号（display_name 取 @ 前段）；
+  响应不含邮箱存在性——防枚举）→ `POST /auth/verify` 验证即登录，邮箱没注册过就自动建号（display_name 取 @ 前段）；
   会话用**服务端 sessions 表 + HttpOnly cookie**（不用 JWT：可撤销、封号即时生效、30 天滑动续期）
 - **防滥用**：发码频控（每邮箱 1 次/分钟、5 次/小时、10 次/天，每 IP 20 次/天，auth_codes 计数零新依赖）；
-  注册邀请码（`.env` 的 `INVITE_CODE`，配了则首次注册必填）；邮件通道 `MailProvider` 抽象——
-  `MAIL_PROVIDER=console`（默认，验证码打控制台，本地调试 cloud 模式用）或 `smtp`（QQ/163 授权码，零新依赖）
+  邮件通道 `MailProvider` 抽象——`MAIL_PROVIDER=console`（默认，验证码打控制台，本地调试用）或
+  `smtp`（QQ/163 授权码，零新依赖）；发码响应带 `channel`，console 通道时登录页如实提示"码在后端控制台"
+  （v0.7.3，收不到验证码时先看这里）
 - **数据隔离收口**（设计文档审计清单逐项修复）：PATCH/DELETE 会话、列消息、两个 SSE 对话流补归属校验（非本人一律 404，不暴露存在性）；
   文件下载按请求者定位磁盘；`test_isolation.py` HTTP 层隔离套件（两用户互访全部 404/不可见）
 - **文件 per-user 目录**：`data/{uploads,generated}/u{user_id}/`——磁盘目录本身就是归属边界；
@@ -260,6 +261,15 @@
   首个管理员由 `.env` 的 `ADMIN_EMAIL` 指定（该邮箱注册即 is_admin）
 - **前端**：新增登录页（邮箱 → 验证码两步卡片，仅 cloud 模式出现）；App 启动先调 `/auth/me`，
   任意请求 401 自动切回登录页；设置弹窗新增账号区（邮箱/管理员徽标/退出登录）；local 模式界面零变化
+
+**v0.7.3（收不到验证码可自查 · 移除注册邀请码）**
+
+- **"收不到验证码"页面上可直接自查**：`/auth/request-code` 响应带 `channel`（console/smtp），
+  console 通道（默认，未配 SMTP）时登录页与账号管理页签如实提示"验证码已打印到后端控制台，
+  配置 `MAIL_PROVIDER=smtp` 后才会发送到邮箱"——本地调试 cloud 模式/部署前自检时不再疑惑码去哪了
+- **移除注册邀请码**（`.env` 的 `INVITE_CODE` 与登录表单的邀请码输入框）：个人规模用不上、
+  开放注册即可，防滥用依赖既有发码频控；设计文档决策点 #2 已标注移除原因
+- README 补 cloud 上线的 SMTP 配置三步（QQ/163 授权码）与上线自检清单
 
 **v0.7.2（账号管理页签 · 本地模式可随时登录 · Markdown 字面量修复）**
 
@@ -285,8 +295,12 @@
   文件列表在内容区**内部滚动**（文件多时不再撑高弹窗或溢出屏幕）；“项目”弹窗同款设计
 
 部署为多用户服务（cloud 模式）时：`.env` 设 `AUTH_MODE=cloud`、`SERVICE_SECRET=<随机长串>`、
-`ADMIN_EMAIL=<你的邮箱>`、（可选）`INVITE_CODE=<邀请码>` 与 `MAIL_PROVIDER=smtp` + SMTP 授权码；
-验证码邮件没配 SMTP 时打到后端控制台（本地调试）。方案细节见 `docs/design-v0.7-v0.8.md`。
+`ADMIN_EMAIL=<你的邮箱>` 与 `MAIL_PROVIDER=smtp` + SMTP 授权码——**cloud 上线必须配 SMTP，
+否则用户收不到验证码**（console 通道只打印在后端控制台，登录页也会如实提示）。
+QQ 邮箱三步：网页版设置 → 账号 → 开启「IMAP/SMTP 服务」→ 手机短信生成授权码（不是登录密码）→
+`SMTP_HOST=smtp.qq.com`、`SMTP_PORT=465`、`SMTP_USER/MAIL_FROM=你的QQ邮箱`、`SMTP_PASSWORD=授权码`
+（163 邮箱同理，`smtp.163.com:465`）。上线自检：用自己邮箱走一遍发码-登录，确认真实收到邮件。
+方案细节见 `docs/design-v0.7-v0.8.md`。
 
 ## 环境要求
 
