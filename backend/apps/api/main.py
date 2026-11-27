@@ -18,6 +18,7 @@ from apps.api.routes import (
     search,
     tasks,
 )
+from apps.api.routes import local_projects as local_projects_route
 from apps.api.routes import memories as memories_route
 from apps.api.routes import projects as projects_route
 from apps.api.routes import settings as settings_route
@@ -54,7 +55,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="0.7.3", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.7.4", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -77,6 +78,9 @@ app.include_router(memories_route.router, prefix=settings.api_v1_prefix)
 app.include_router(groups.router, prefix=settings.api_v1_prefix)
 app.include_router(search.router, prefix=settings.api_v1_prefix)
 app.include_router(admin.router, prefix=settings.api_v1_prefix)
+# 本地项目（v0.7.4 伪编辑器）只在 local 模式存在：远程用户没有"本机磁盘"可言（路由层还有双保险）
+if settings.auth_mode == "local":
+    app.include_router(local_projects_route.router, prefix=settings.api_v1_prefix)
 
 
 # 托管已构建的前端（frontend/dist），使 http://127.0.0.1:8000 直接打开页面。

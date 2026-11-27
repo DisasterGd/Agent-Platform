@@ -90,6 +90,10 @@ class Conversation(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     project_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    # v0.7.4 本地项目：与 project_id 互斥（服务层建号时校验），FK 级联置空——注销项目不丢会话
+    local_project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("local_projects.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     # v0.4.1 用户自定义分组（默认分组“项目/任务/未分组”由代码归类，不落列）
     group_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(200), default="新会话")
@@ -118,6 +122,28 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(200), default="未命名项目")
     description: Mapped[str] = mapped_column(Text, default="")
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class LocalProject(Base):
+    """v0.7.4 本地项目：用户机器上真实目录的注册记录（伪编辑器，仅 local 模式暴露路由）。
+
+    root_path 一经注册不再修改——磁盘即事实来源；删除注册只删本行、绝不动磁盘文件，
+    关联会话的 local_project_id 由数据库置空（会话保留，只是脱离项目）。
+    与 v0.4 Project（归档容器）互不混用：会话二者取其一。
+    """
+    __tablename__ = "local_projects"
+    __table_args__ = (
+        UniqueConstraint("user_id", "root_path", name="uq_local_projects_user_root"),
+        Index("ix_local_projects_user_updated", "user_id", "updated_at"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(200), default="")
+    root_path: Mapped[str] = mapped_column(String(500))
+    # 项目级写入开关（v0.7.6 工具注入用）：False=Agent 只读（根本不给写工具）
+    allow_write: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
