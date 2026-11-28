@@ -1,10 +1,16 @@
+import sys
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 项目根目录（backend/src/agent_platform/config.py 往上三层）
-_ROOT = Path(__file__).resolve().parents[3]
+# 项目根目录。
+# 开发：backend/src/agent_platform/config.py 往上三层 = 仓库根目录；
+# PyInstaller 打包后：.env 与 data/ 都放 exe 旁边（便携），按 sys.executable 定位。
+if getattr(sys, "frozen", False):
+    _ROOT = Path(sys.executable).resolve().parent
+else:
+    _ROOT = Path(__file__).resolve().parents[3]
 _ENV_FILE = _ROOT / ".env"
 
 
