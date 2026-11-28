@@ -896,7 +896,7 @@ function Workbench({ me }: { me: MeInfo }) {
         </div>
         <div className="topbar-meta">
           <span className="meta-item" data-tip="当前生效的模型配置（设置页可改）">模型 <b>{modelNote}</b></span>
-          <span className="meta-item">v0.7.0</span>
+          <span className="meta-item" data-tip="版本号来自 package.json，构建时注入（v0.8.2 起）">v{__APP_VERSION__}</span>
           <span className="meta-item"><span className="led" />就绪</span>
           <button className="settings-btn" onClick={() => setSettingsOpen(true)}>设置</button>
         </div>

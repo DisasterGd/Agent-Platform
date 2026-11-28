@@ -33,6 +33,7 @@ CLAUDE.md
 .claude.json
 .claude.jsonl
 .mcp.json
+.playwright-mcp/
 
 # IDE
 .idea/
