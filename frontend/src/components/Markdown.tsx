@@ -60,14 +60,17 @@ const CodeBlock = memo(function CodeBlock({ language, code }: { language: string
         <span>{language || "text"}</span>
         <button type="button" onClick={() => void copy()}>{copied ? "已复制" : "复制"}</button>
       </div>
-      <SyntaxHighlighter
-        language={language || "text"}
-        style={oneLight}
-        wrapLongLines
-        customStyle={{ margin: 0, background: "transparent", fontSize: "13px", lineHeight: "1.6", fontFamily: '"IBM Plex Mono","SFMono-Regular",Consolas,monospace' }}
-      >
-        {deferredCode}
-      </SyntaxHighlighter>
+      {/* v0.8.2 固定区域：超长代码块在框内滚动，不再把整条对话流撑到没边 */}
+      <div className="codeblock-body">
+        <SyntaxHighlighter
+          language={language || "text"}
+          style={oneLight}
+          wrapLongLines
+          customStyle={{ margin: 0, background: "transparent", fontSize: "13px", lineHeight: "1.6", fontFamily: '"IBM Plex Mono","SFMono-Regular",Consolas,monospace' }}
+        >
+          {deferredCode}
+        </SyntaxHighlighter>
+      </div>
     </div>
   );
 });

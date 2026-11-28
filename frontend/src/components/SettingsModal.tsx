@@ -122,8 +122,9 @@ function AccountPanel({
 }
 
 export default function SettingsModal({ theme, onThemeChange, onClose, me, onLogout, onLoginSuccess }: Props) {
-  // v0.7.2：账号管理为第一个页签（默认打开）；v0.8.0 平台页签（部署者：local=本机用户 / cloud=admin）
-  const [tab, setTab] = useState<"account" | "model" | "memory" | "platform">("account");
+  // v0.8.2 布局重做：固定大小弹窗 + 左侧分类导航（参考 Claude 官方设置页）；
+  // 「外观」（主题）从模型页拆出独立成页。账号管理仍是默认打开的第一个页签。
+  const [tab, setTab] = useState<"account" | "appearance" | "model" | "memory" | "platform">("account");
   const [presets, setPresets] = useState<Record<string, Preset>>({});
   const [profiles, setProfiles] = useState<Record<string, ProfileView>>({});
   const [config, setConfig] = useState<ModelConfig | null>(null);
@@ -235,110 +236,120 @@ export default function SettingsModal({ theme, onThemeChange, onClose, me, onLog
   return (
     <div className="modal-overlay"
       onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
+      <div className="modal settings-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-head">
           <span className="modal-title">设置</span>
           <button className="modal-close" data-tip="关闭" onClick={onClose}>×</button>
         </div>
 
-        <div className="modal-tabs">
-          <button type="button" className={tab === "account" ? "on" : ""} onClick={() => setTab("account")}>账号</button>
-          <button type="button" className={tab === "model" ? "on" : ""} onClick={() => setTab("model")}>模型</button>
-          <button type="button" className={tab === "memory" ? "on" : ""} onClick={() => setTab("memory")}>记忆</button>
-          {(me?.mode !== "cloud" || me.is_admin) && (
-            <button type="button" className={tab === "platform" ? "on" : ""} onClick={() => setTab("platform")}>平台</button>
-          )}
-        </div>
-
-        <div className="modal-body">
-          {tab === "account" ? (
-            <AccountPanel me={me} onLogout={onLogout} onLoginSuccess={onLoginSuccess} />
-          ) : tab === "platform" ? <PlatformPanel />
-          : tab === "memory" ? <MemoryPanel /> : (<>
-          <section className="set-section">
-            <h3>主题</h3>
-            <div className="theme-toggle">
-              <button className={theme === "light" ? "on" : ""} onClick={() => onThemeChange("light")}>浅色</button>
-              <button className={theme === "dark" ? "on" : ""} onClick={() => onThemeChange("dark")}>深色</button>
-            </div>
-          </section>
-
-          <section className="set-section">
-            <h3>模型角色</h3>
-            <p className="set-note">
-              分工预配置：主模型负责推理与写码，识图/生图交给真正的多模态厂商——四个角色可以引用<b>不同供应商</b>的凭据，
-              组合出性价比方案（如推理 DeepSeek + 识图百炼 + 嵌入百炼）。纯文本任务只走主模型，不会动用其他角色。
-            </p>
-            {ROLE_META.map(meta => (
-              <RoleCard
-                key={meta.key}
-                title={meta.title} desc={meta.desc} optionKey={meta.optionKey} allowNone={meta.allowNone}
-                value={roles[meta.key]}
-                presets={presets} profiles={profiles} discoveredBy={discoveredBy}
-                defaultProvider={draft?.provider ?? "deepseek"}
-                onChange={v => setRoles(cur => ({ ...cur, [meta.key]: v }))}
-              />
-            ))}
-            {reasoningUnusable && (
-              <div className="role-warn">主模型引用的供应商还没有 API Key：到下方“供应商凭据”里选好该家并填入 Key 后保存。</div>
+        <div className="settings-shell">
+          <nav className="settings-nav" aria-label="设置分类">
+            <button type="button" className={tab === "account" ? "on" : ""} onClick={() => setTab("account")}>账号</button>
+            <button type="button" className={tab === "appearance" ? "on" : ""} onClick={() => setTab("appearance")}>外观</button>
+            <button type="button" className={tab === "model" ? "on" : ""} onClick={() => setTab("model")}>模型</button>
+            <button type="button" className={tab === "memory" ? "on" : ""} onClick={() => setTab("memory")}>记忆</button>
+            {(me?.mode !== "cloud" || me.is_admin) && (
+              <button type="button" className={tab === "platform" ? "on" : ""} onClick={() => setTab("platform")}>平台</button>
             )}
-          </section>
+          </nav>
 
-          <section className="set-section">
-            <h3>供应商凭据</h3>
-            <p className="set-note">这里只编辑<b>一个供应商</b>的 Base URL 与 API Key（各供应商互相独立、互不覆写）；上方的角色决定谁干活。</p>
-            <div className="preset-row">
-              {Object.entries(presets).map(([id, p]) => (
-                <button key={id} type="button" className={`preset ${draft?.provider === id ? "on" : ""}`}
-                  data-tip={`编辑 ${p.label} 的凭据`}
-                  onClick={() => switchProvider(id)}>
-                  {p.label}
-                  {profiles[id]?.has_api_key && <span className="preset-dot" aria-label="已配置 Key" />}
-                </button>
-              ))}
-            </div>
+          <div className="settings-page">
+            {tab === "account" && (
+              <AccountPanel me={me} onLogout={onLogout} onLoginSuccess={onLoginSuccess} />
+            )}
 
-            {!draft ? (
-              <div className="sub-empty">正在读取配置…</div>
-            ) : (<>
-              <label className="field">
-                <span>Base URL</span>
-                <input type="text" value={draft.base_url} placeholder="https://api.example.com/v1"
-                  autoComplete="off" spellCheck={false}
-                  onChange={e => update({ base_url: e.target.value })} />
-              </label>
+            {tab === "appearance" && (
+              <section className="set-section">
+                <h3>主题</h3>
+                <div className="theme-toggle">
+                  <button className={theme === "light" ? "on" : ""} onClick={() => onThemeChange("light")}>浅色</button>
+                  <button className={theme === "dark" ? "on" : ""} onClick={() => onThemeChange("dark")}>深色</button>
+                </div>
+              </section>
+            )}
 
-              <label className="field">
-                <span>API Key{draftHasSavedKey && <em className="field-hint">（已加密保存，不会回显）</em>}</span>
-                <SecretInput key={draft.provider} hasSaved={draftHasSavedKey} value={draft.api_key} onChange={onKeyChange} />
-              </label>
+            {tab === "platform" && <PlatformPanel />}
 
-              {activePreset?.api_url && (
-                <a className="api-link" href={activePreset.api_url} target="_blank" rel="noreferrer">
-                  获取 {activePreset.label} API Key ↗
-                </a>
-              )}
+            {tab === "memory" && <MemoryPanel />}
 
-              <div className="discover-row">
-                <button type="button" className="discover-btn" onClick={() => void discover()} disabled={discovering}
-                  data-tip="向该 Base URL 发 GET /models（OpenAI 兼容），实时列出这个 Key 能调用的全部模型">
-                  {discovering ? "获取中…" : "获取可用模型"}
-                </button>
-                {discoverNote && <span className={`discover-msg${discoverBad ? " err" : ""}`}>{discoverNote}</span>}
-              </div>
+            {tab === "model" && (<>
+              <section className="set-section">
+                <h3>模型角色</h3>
+                <p className="set-note">
+                  分工预配置：主模型负责推理与写码，识图/生图交给真正的多模态厂商——四个角色可以引用<b>不同供应商</b>的凭据，
+                  组合出性价比方案（如推理 DeepSeek + 识图百炼 + 嵌入百炼）。纯文本任务只走主模型，不会动用其他角色。
+                </p>
+                {ROLE_META.map(meta => (
+                  <RoleCard
+                    key={meta.key}
+                    title={meta.title} desc={meta.desc} optionKey={meta.optionKey} allowNone={meta.allowNone}
+                    value={roles[meta.key]}
+                    presets={presets} profiles={profiles} discoveredBy={discoveredBy}
+                    defaultProvider={draft?.provider ?? "deepseek"}
+                    onChange={v => setRoles(cur => ({ ...cur, [meta.key]: v }))}
+                  />
+                ))}
+                {reasoningUnusable && (
+                  <div className="role-warn">主模型引用的供应商还没有 API Key：到下方“供应商凭据”里选好该家并填入 Key 后保存。</div>
+                )}
+              </section>
 
-              <p className="set-note">
-                模型名会原样发给厂商接口，必须与其官方 id 一致（大小写、. 与 - 都参与匹配，填错会明确报错而不是悄悄换模型）；
-                拿不准就选下拉或先“获取可用模型”。模型名留空时，自动使用该供应商的默认模型名。
-              </p>
+              <section className="set-section">
+                <h3>供应商凭据</h3>
+                <p className="set-note">这里只编辑<b>一个供应商</b>的 Base URL 与 API Key（各供应商互相独立、互不覆写）；上方的角色决定谁干活。</p>
+                <div className="preset-row">
+                  {Object.entries(presets).map(([id, p]) => (
+                    <button key={id} type="button" className={`preset ${draft?.provider === id ? "on" : ""}`}
+                      data-tip={`编辑 ${p.label} 的凭据`}
+                      onClick={() => switchProvider(id)}>
+                      {p.label}
+                      {profiles[id]?.has_api_key && <span className="preset-dot" aria-label="已配置 Key" />}
+                    </button>
+                  ))}
+                </div>
 
-              {error && <div className="error">{error}</div>}
-              <button className="save-btn" onClick={() => void save()} disabled={saving}>
-                {saving ? "保存中…" : saved ? "已保存" : "保存（角色 + 当前凭据）"}
-              </button>
+                {!draft ? (
+                  <div className="sub-empty">正在读取配置…</div>
+                ) : (<>
+                  <label className="field">
+                    <span>Base URL</span>
+                    <input type="text" value={draft.base_url} placeholder="https://api.example.com/v1"
+                      autoComplete="off" spellCheck={false}
+                      onChange={e => update({ base_url: e.target.value })} />
+                  </label>
+
+                  <label className="field">
+                    <span>API Key{draftHasSavedKey && <em className="field-hint">（已加密保存，不会回显）</em>}</span>
+                    <SecretInput key={draft.provider} hasSaved={draftHasSavedKey} value={draft.api_key} onChange={onKeyChange} />
+                  </label>
+
+                  {activePreset?.api_url && (
+                    <a className="api-link" href={activePreset.api_url} target="_blank" rel="noreferrer">
+                      获取 {activePreset.label} API Key ↗
+                    </a>
+                  )}
+
+                  <div className="discover-row">
+                    <button type="button" className="discover-btn" onClick={() => void discover()} disabled={discovering}
+                      data-tip="向该 Base URL 发 GET /models（OpenAI 兼容），实时列出这个 Key 能调用的全部模型">
+                      {discovering ? "获取中…" : "获取可用模型"}
+                    </button>
+                    {discoverNote && <span className={`discover-msg${discoverBad ? " err" : ""}`}>{discoverNote}</span>}
+                  </div>
+
+                  <p className="set-note">
+                    模型名会原样发给厂商接口，必须与其官方 id 一致（大小写、. 与 - 都参与匹配，填错会明确报错而不是悄悄换模型）；
+                    拿不准就选下拉或先“获取可用模型”。模型名留空时，自动使用该供应商的默认模型名。
+                  </p>
+
+                  {error && <div className="error">{error}</div>}
+                  <button className="save-btn" onClick={() => void save()} disabled={saving}>
+                    {saving ? "保存中…" : saved ? "已保存" : "保存（角色 + 当前凭据）"}
+                  </button>
+                </>)}
+              </section>
             </>)}
-          </section>
-          </>)}
+          </div>
         </div>
       </div>
     </div>
