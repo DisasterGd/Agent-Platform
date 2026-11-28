@@ -395,13 +395,14 @@
 
 **首次使用先完成下面 1–5 步（一次性）**；之后每次只需双击启动，无需开终端。
 
-- **双击仓库根目录的 `start.bat`**：自动检查虚拟环境 / `.env` / 前端构建 → 跑数据库迁移（幂等）→ 启动后端 → 打开浏览器 `http://127.0.0.1:8000`。
+- **发布版 = 单文件 exe**：`scripts\build_exe.py` 打包出 `dist\AgentPlatform.exe`，双击即用（首次运行自动生成 `.env`）；打包与 GitHub 发布见 `docs/release-guide.md`。
+- **开发版 = `start.bat`**：双击仓库根目录的 `start.bat`，自动检查虚拟环境 / `.env` / 前端构建 → 跑数据库迁移（幂等）→ 启动后端 → 打开浏览器 `http://127.0.0.1:8000`。
 - **桌面快捷方式（可选，一次）**：双击 `make_shortcut.bat`，桌面出现「Agent Platform」图标，之后双击图标即可启动。
 - 启动前需保证 **MySQL 服务已启动**；若 8000 端口已有实例在跑，`start.bat` 只打开浏览器、不重复启动。
 - 弹出的**黑色控制台窗口就是启动器本体**：关闭窗口（或 Ctrl+C）即停止服务。
 - `start.bat` 会透传参数给后端，例如 `start.bat --no-browser` 启动但不自动开浏览器。
 
-> v0.9 启动器采用「脚本 + 快捷方式」的稳妥方案（不打包 EXE）。`start.bat` 用纯 ASCII 提示避免中文乱码，
+> `start.bat` 用纯 ASCII 提示避免中文乱码；打包 exe / 发布到 GitHub 的完整步骤见 `docs/release-guide.md`，
 > 详细中文指引见下方各节。
 
 ## 1. 安装 Python 3.12
@@ -558,10 +559,14 @@ data/                        上传与生成的文件、settings.json（gitignor
 | v0.6 | 多模型管理 | 支持不同模型切换 | ✅（v0.6.2 向量检索 + 生图实测） |
 | v0.7 | 账号体系 | 注册、登录、权限管理 | ✅（v0.7.0 双模式 + 验证码登录 + 隔离 + 管理员） |
 | v0.8 | 云端部署 | 多用户在线服务 | 🚧 0.8.x 交付物完成，上线待 Docker 演练 + Cloudflare Tunnel |
-| v0.9 | 桌面启动器 | Windows 双击启动与云端连接 | ✅ v0.9.0 双击启动（`start.bat` + 桌面快捷方式） |
+| v0.9 | 桌面启动器 | Windows 双击启动与云端连接 | ✅ v0.9.0 双击启动 + 便携 exe（`scripts/build_exe.py`） |
 | v1.0 | 完整 Agent 平台 | 安全、稳定、可扩展 | |
 
 版本只是开发里程碑，不意味着每个版本必须严格按编号发布。
+
+## 开源协议
+
+本项目基于 [MIT License](LICENSE) 开源（Copyright © 2026 Disastergod）。
 
 ## 重要架构约束
 
