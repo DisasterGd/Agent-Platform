@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from agent_platform.core.events import to_sse
+from agent_platform.core.events import Event
 from agent_platform.services.task_service import TaskService
 from apps.api.dependencies import get_current_user_id, get_db
 from apps.api.sse import with_heartbeat
@@ -151,9 +151,10 @@ async def execute_task(
     service = TaskService(db, user_id)
     _get_owned_task(service, task_id, user_id)
 
-    async def event_stream() -> AsyncIterator[str]:
+    # 产出 Event 对象，编码统一交给 with_heartbeat（同 chat.py v0.8.2 修复，勿回退双层 to_sse）
+    async def event_stream() -> AsyncIterator[Event]:
         async for event in service.execute(task_id, user_id):
-            yield to_sse(event)
+            yield event
 
     return StreamingResponse(
         with_heartbeat(event_stream()),

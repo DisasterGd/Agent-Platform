@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from agent_platform.core.events import to_sse
+from agent_platform.core.events import Event
 from agent_platform.services.chat_service import ChatService
 from apps.api.dependencies import get_current_user_id, get_db
 from apps.api.sse import with_heartbeat
@@ -158,14 +158,16 @@ async def stream_chat(
     if service.get_conversation(body.conversation_id, user_id) is None:
         raise HTTPException(status_code=404, detail="会话不存在")
 
-    async def event_stream() -> AsyncIterator[str]:
-        # v0.8.1 心跳：30s 无事件时发注释帧，防中间层超时掐断/僵尸连接
+    # 注意：这里产出 Event 对象，SSE 编码统一由 with_heartbeat 负责（v0.8.2 修复：
+    # 之前这里先 to_sse 成字符串帧、with_heartbeat 再编码一次，第一帧即 AttributeError 断流，
+    # 表现为每条回复都落库成"（回复生成被中断）"）。
+    async def event_stream() -> AsyncIterator[Event]:
         async for event in service.stream_reply(
             body.conversation_id,
             body.content,
             [a.model_dump() for a in body.attachments],
         ):
-            yield to_sse(event)
+            yield event
 
     return StreamingResponse(
         with_heartbeat(event_stream()),
@@ -184,9 +186,9 @@ async def regenerate_chat(
     if service.get_conversation(body.conversation_id, user_id) is None:
         raise HTTPException(status_code=404, detail="会话不存在")
 
-    async def event_stream() -> AsyncIterator[str]:
+    async def event_stream() -> AsyncIterator[Event]:
         async for event in service.regenerate_reply(body.conversation_id, body.message_id, body.content):
-            yield to_sse(event)
+            yield event
 
     return StreamingResponse(
         with_heartbeat(event_stream()),
