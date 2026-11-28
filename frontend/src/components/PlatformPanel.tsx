@@ -124,7 +124,7 @@ export default function PlatformPanel() {
               value={mUser} onChange={e => setMUser(e.target.value)} />
             <label className="login-label" htmlFor="pf-smtp-pwd">授权码</label>
             <SecretInput hasSaved={mail?.has_password ?? false} value={mPwd} onChange={setMPwd} />
-            <label className="login-label" htmlFor="pf-mail-from">发件人显示地址（留空则同发信账号）</label>
+            <label className="login-label" htmlFor="pf-mail-from">发件人地址（QQ/163/126 必须与发信账号一致；留空则同发信账号）</label>
             <input id="pf-mail-from" className="set-input" type="text" placeholder="you@qq.com"
               value={mFrom} onChange={e => setMFrom(e.target.value)} />
           </>

@@ -89,6 +89,19 @@ def save_mail_config(db: Session, patch: dict) -> dict:
         if not (0 < stored["port"] < 65536):
             raise PlatformConfigError("端口范围 1-65535")
 
+    # 个人邮箱（QQ/163/126）要求发件人地址=授权账号，否则服务器拒收（实测 501 Mail from
+    # address must be same as authorization user），而验证码接口会把发送失败静默吞掉——
+    # 必须在保存时就拦下，而不是等用户收不到码再查后端日志。
+    if provider == "smtp" and stored.get("host") and stored.get("user") and stored.get("from_addr"):
+        host_l = str(stored["host"]).lower()
+        if any(p in host_l for p in ("smtp.qq.com", "smtp.163.com", "smtp.126.com")):
+            from_domain = str(stored["from_addr"]).split("@")[-1].lower()
+            user_domain = str(stored["user"]).split("@")[-1].lower()
+            if from_domain != user_domain:
+                raise PlatformConfigError(
+                    f"QQ/163/126 邮箱的发件人地址必须与发信账号一致：请填 {stored['user']} 或留空"
+                )
+
     if "password" in patch:
         value = (patch.get("password") or "").strip()
         stored["password_enc"] = secret_store.encrypt(value) if value else ""
