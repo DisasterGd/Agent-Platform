@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import string
+import threading
 from pathlib import Path
 
 from agent_platform.infrastructure.filetypes import (
@@ -112,6 +113,39 @@ def browse(path: str) -> dict:
         raise LocalProjectError(f"目录不可读：{exc}") from exc
     parent = str(current.parent) if current.parent != current else ""
     return {"path": str(current), "parent": parent, "dirs": sorted(dirs, key=str.lower)}
+
+
+# v0.8.2 原生目录选择：同一时刻只允许一个对话框（对话框是模态的，用户不选完不返回）
+_pick_lock = threading.Lock()
+
+
+def pick_directory() -> str | None:
+    """弹系统原生「选择目录」对话框（Windows 文件管理器外观），返回选中的绝对路径；取消返回 None。
+
+    v0.8.2：替代前端自绘的逐层目录树（FolderPickerModal）——本机后端就在用户机器上，
+    直接用 tkinter 的 askdirectory 弹真·文件管理器窗口，体验与上传附件一致。
+    tkinter 每线程一个 Tk 实例：这里在独立线程跑（路由层 asyncio.to_thread），互不干扰；
+    置顶属性防对话框被浏览器窗口挡住（用户以为按钮没反应）。
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError as exc:
+        raise LocalProjectError("本机 Python 缺少 tkinter，无法弹出目录选择窗口", status_code=503) from exc
+
+    if not _pick_lock.acquire(blocking=False):
+        raise LocalProjectError("已有一个目录选择窗口未关闭，请先完成或取消它", status_code=409)
+    try:
+        root = tk.Tk()
+        try:
+            root.withdraw()  # 不显示主窗口，只要对话框
+            root.attributes("-topmost", True)
+            path = filedialog.askdirectory(parent=root, title="选择要注册为本地项目的目录")
+        finally:
+            root.destroy()
+        return path or None
+    finally:
+        _pick_lock.release()
 
 
 def list_layer(root: Path, rel: str = ".") -> dict:

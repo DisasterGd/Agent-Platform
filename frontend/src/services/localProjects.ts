@@ -33,6 +33,10 @@ export const localProjectsApi = {
       body: JSON.stringify({ root_path, title }),
     }),
 
+  /** v0.8.2 弹系统原生目录选择对话框（Windows 文件管理器），返回选中路径；用户取消时 path=null。 */
+  pick: () =>
+    request<{ path: string | null }>("/api/local-projects/pick", { method: "POST" }),
+
   update: (id: number, patch: { title?: string; allow_write?: boolean }) =>
     request<LocalProject>(`/api/local-projects/${id}`, {
       method: "PATCH",
@@ -45,7 +49,7 @@ export const localProjectsApi = {
     if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
   },
 
-  /** 选目录弹窗起点：Windows 盘符列表。 */
+  /** 选目录弹窗起点：Windows 盘符列表（v0.8.2 起自绘树不再使用，端点保留）。 */
   drives: () => request<{ drives: string[] }>("/api/local-projects/drives"),
 
   /** 逐层浏览子目录（忽略 node_modules/.git 等噪音）。 */

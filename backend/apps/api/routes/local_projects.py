@@ -149,3 +149,20 @@ def browse(
         return local_project_service.browse(path)
     except LocalProjectError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.post("/local-projects/pick")
+async def pick_directory(_auth: int = Depends(get_current_user_id)) -> dict:
+    """弹系统原生目录选择对话框（v0.8.2，Windows 文件管理器外观），返回选中路径；取消返回 null。
+
+    阻塞调用放线程池跑（对话框等用户操作，可能很久），不占用事件循环；
+    同一时刻只允许一个对话框（并发第二请求 409）。只返回路径、不触碰文件系统——
+    真正的注册仍走 POST /local-projects（normalize_root 白名单校验不变）。
+    """
+    import asyncio
+
+    try:
+        path = await asyncio.to_thread(local_project_service.pick_directory)
+    except LocalProjectError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return {"path": path}

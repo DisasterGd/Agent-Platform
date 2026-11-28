@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import FolderPickerModal from "./FolderPickerModal";
+import { localProjectsApi } from "../services/localProjects";
 import type { Conversation, LocalProject, Project } from "../types/chat";
 
 interface Props {
@@ -40,8 +40,12 @@ export default function ProjectsModal(props: Props) {
   const [menuFor, setMenuFor] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draftName, setDraftName] = useState("");
-  // v0.7.4 本地项目：添加弹窗与行内菜单
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // v0.8.2 本地项目：原生目录选择对话框（后端 tkinter askdirectory）+ 命名确认；行内菜单
+  const [picking, setPicking] = useState(false);
+  const [pickError, setPickError] = useState("");
+  const [pickedPath, setPickedPath] = useState<string | null>(null);
+  const [pickTitle, setPickTitle] = useState("");
+  const [pickBusy, setPickBusy] = useState(false);
   const [lpMenuFor, setLpMenuFor] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -50,6 +54,39 @@ export default function ProjectsModal(props: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [menuFor, onClose]);
+
+  /** 弹 Windows 原生目录选择对话框：选中后进入命名确认，取消则静默返回。 */
+  async function startPick() {
+    setPicking(true);
+    setPickError("");
+    try {
+      const { path } = await localProjectsApi.pick();
+      if (path) {
+        setPickedPath(path);
+        setPickTitle(path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "");
+      }
+    } catch (e) {
+      setPickError(e instanceof Error ? e.message : "无法打开目录选择窗口");
+    } finally {
+      setPicking(false);
+    }
+  }
+
+  async function createPicked() {
+    if (!pickedPath) return;
+    setPickBusy(true);
+    setPickError("");
+    try {
+      const project = await localProjectsApi.create(pickedPath, pickTitle.trim());
+      onLocalCreated?.(project);
+      setPickedPath(null);
+      setPickTitle("");
+    } catch (e) {
+      setPickError(e instanceof Error ? e.message : "注册失败");
+    } finally {
+      setPickBusy(false);
+    }
+  }
 
   function commitCreate() {
     const name = draft.trim();
@@ -78,7 +115,10 @@ export default function ProjectsModal(props: Props) {
           <span className="proj-toolbar-hint">把相关会话收进同一个项目，项目记忆只在项目内生效。</span>
           <div className="proj-toolbar-actions">
             {localProjects && onLocalCreated && (
-              <button type="button" className="proj-new-btn" onClick={() => setPickerOpen(true)}>＋ 添加本地项目</button>
+              <button type="button" className="proj-new-btn" disabled={picking}
+                onClick={() => void startPick()}>
+                {picking ? "请在弹出窗口中选择…" : "＋ 添加本地项目"}
+              </button>
             )}
             {!creating && <button type="button" className="proj-new-btn" onClick={() => { setCreating(true); inputRef.current?.focus(); }}>＋ 新建项目</button>}
             {creating && (
@@ -92,6 +132,8 @@ export default function ProjectsModal(props: Props) {
             )}
           </div>
         </div>
+
+        {pickError && !pickedPath && <p className="login-error pick-error" role="alert">{pickError}</p>}
 
         <div className="modal-body proj-body">
           {projects.length === 0 && !creating && (
@@ -184,12 +226,35 @@ export default function ProjectsModal(props: Props) {
         )}
       </div>
 
-      {pickerOpen && onLocalCreated && (
-        <FolderPickerModal
-          onClose={() => setPickerOpen(false)}
-          onCreated={onLocalCreated}
-        />
+      {pickedPath && (
+        <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget && !pickBusy) setPickedPath(null); }}>
+          <div className="modal fixed" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <span className="modal-title">确认本地项目</span>
+              <button className="modal-close" data-tip="关闭" disabled={pickBusy} onClick={() => setPickedPath(null)}>×</button>
+            </div>
+            <div className="modal-body">
+              {pickError && <p className="login-error">{pickError}</p>}
+              <p className="set-note">项目目录</p>
+              <p className="fp-path">{pickedPath}</p>
+              <label className="login-label" htmlFor="lp-title">显示名</label>
+              <input
+                id="lp-title" className="login-input" type="text" autoFocus
+                value={pickTitle} onChange={e => setPickTitle(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") void createPicked(); }}
+              />
+              <p className="set-note">注册只记录路径，不会移动或改动任何文件。</p>
+              <div className="fp-naming-actions">
+                <button type="button" className="login-link" disabled={pickBusy} onClick={() => setPickedPath(null)}>取消</button>
+                <button type="button" className="login-btn" disabled={pickBusy} onClick={() => void createPicked()}>
+                  {pickBusy ? "注册中…" : "注册本地项目"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
+
     </div>
   );
 }
